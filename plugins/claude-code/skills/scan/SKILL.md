@@ -20,6 +20,7 @@ Fallbacks:
 - If there are no changed files, report that the changed-file scan found no targets and ask whether to run `greprules scan --full`.
 - If the user explicitly asks for a full scan, run `greprules scan --full`.
 - If registry access fails, report the registry URL and the error from `doctor --format json`.
-- If the CLI wrapper reports that the real CLI is missing, tell the user to put `greprules` on `PATH`, set `GREPRULES_CLI_PATH`, or place the binary at `$CLAUDE_PLUGIN_DATA/greprules`.
+- If OpenGrep is not ready, summarize whether plugin configuration is trying automatic install, system PATH, or a custom executable path.
+- If the CLI wrapper reports that the real CLI is missing, tell the user to put `greprules` on `PATH`, set `GREPRULES_CLI_PATH`, or let the plugin bootstrap the release binary under `$CLAUDE_PLUGIN_DATA/greprules/v0.1.0/`.
 
 Do not parse `.greprules/config.yaml`, `.greprules/config.local.json`, or `~/.config/greprules/config.json` manually unless the CLI command itself is failing and the user asks for debugging.

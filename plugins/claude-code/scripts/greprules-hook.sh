@@ -3,7 +3,7 @@ set -u
 
 MODE="${1:-scan-if-dirty}"
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
-GREPRULES="${GREPRULES_CLI_PATH:-${PLUGIN_ROOT}/bin/greprules}"
+GREPRULES="${PLUGIN_ROOT}/bin/greprules"
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
 STATE_DIR="${CLAUDE_PLUGIN_DATA:-${PROJECT_DIR}/.greprules/plugin-data}"
 LOG_PATH="${STATE_DIR}/hook.log"
@@ -137,8 +137,40 @@ auto_scan_enabled() {
 }
 
 plugin_opengrep_mode() {
-  local mode="${CLAUDE_PLUGIN_OPTION_OPENGREP_MODE:-${CLAUDE_PLUGIN_OPTION_opengrep_mode:-}}"
-  printf '%s' "$mode" | tr '[:upper:]' '[:lower:]'
+  local opengrep_path="${CLAUDE_PLUGIN_OPTION_OPENGREP_PATH:-${CLAUDE_PLUGIN_OPTION_opengrep_path:-}}"
+  local install_opengrep="${CLAUDE_PLUGIN_OPTION_INSTALL_OPENGREP:-${CLAUDE_PLUGIN_OPTION_install_opengrep:-}}"
+  local legacy_mode="${CLAUDE_PLUGIN_OPTION_OPENGREP_MODE:-${CLAUDE_PLUGIN_OPTION_opengrep_mode:-}}"
+
+  if [[ -n "$opengrep_path" ]]; then
+    printf 'path'
+    return
+  fi
+
+  if [[ -n "$install_opengrep" ]]; then
+    case "$(printf '%s' "$install_opengrep" | tr '[:upper:]' '[:lower:]')" in
+      0|false|no|off)
+        printf 'system'
+        ;;
+      *)
+        printf 'managed'
+        ;;
+    esac
+    return
+  fi
+
+  legacy_mode="$(printf '%s' "$legacy_mode" | tr '[:upper:]' '[:lower:]')"
+  case "$legacy_mode" in
+    managed|system|path)
+      printf '%s' "$legacy_mode"
+      ;;
+    *)
+      printf 'managed'
+      ;;
+  esac
+}
+
+plugin_opengrep_path() {
+  printf '%s' "${CLAUDE_PLUGIN_OPTION_OPENGREP_PATH:-${CLAUDE_PLUGIN_OPTION_opengrep_path:-}}"
 }
 
 setup_managed_opengrep_if_requested() {
@@ -152,7 +184,7 @@ setup_managed_opengrep_if_requested() {
   fi
 
   local setup_output
-  log_msg "managed OpenGrep setup requested by plugin option"
+  log_msg "managed OpenGrep setup requested by plugin configuration"
   if ! setup_output="$("$GREPRULES" setup-opengrep 2>&1)"; then
     log_msg "managed OpenGrep setup failed: $setup_output"
     emit_context "$event_name" "greprules managed OpenGrep auto-install failed: ${setup_output}"
@@ -210,7 +242,7 @@ doctor_context() {
     exit 0
   fi
 
-  local registry_ok lock_exists active_ok recommended system_ok system_path system_version plugin_mode setup_guidance managed_setup_note
+  local registry_ok lock_exists active_ok recommended system_ok system_path system_version plugin_mode configured_path setup_guidance managed_setup_note
   registry_ok="$(printf '%s' "$doctor_output" | json_field "registry.ok" 2>/dev/null || true)"
   lock_exists="$(printf '%s' "$doctor_output" | json_field "lock.exists" 2>/dev/null || true)"
   active_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.active.ok" 2>/dev/null || true)"
@@ -219,10 +251,11 @@ doctor_context() {
   system_path="$(printf '%s' "$doctor_output" | json_field "opengrep.system.runtime.path" 2>/dev/null || true)"
   system_version="$(printf '%s' "$doctor_output" | json_field "opengrep.system.runtime.version" 2>/dev/null || true)"
   plugin_mode="$(plugin_opengrep_mode)"
+  configured_path="$(plugin_opengrep_path)"
   managed_setup_note=""
 
   if setup_managed_opengrep_if_requested "SessionStart" "$active_ok"; then
-    managed_setup_note=" Managed OpenGrep was installed automatically because setup method is managed."
+    managed_setup_note=" Managed OpenGrep was installed automatically because Install OpenGrep automatically is enabled."
     if ! doctor_output="$("$GREPRULES" doctor --format json 2>&1)"; then
       emit_context "SessionStart" "greprules installed managed OpenGrep, but readiness check failed: ${doctor_output}"
       exit 0
@@ -242,12 +275,26 @@ doctor_context() {
   fi
 
   setup_guidance=""
-  if [[ "$active_ok" != "true" && "$system_ok" == "true" ]]; then
-    setup_guidance=" System OpenGrep was detected at ${system_path:-opengrep}"
-    if [[ -n "$system_version" ]]; then
-      setup_guidance="${setup_guidance} (version ${system_version})"
-    fi
-    setup_guidance="${setup_guidance}. Ask the user whether to use system OpenGrep or install managed OpenGrep. If they choose system, run greprules config set opengrep.mode system --global. If they choose managed, run greprules setup-opengrep. Current plugin opengrep_mode option: ${plugin_mode:-unset}."
+  if [[ "$active_ok" != "true" ]]; then
+    case "$plugin_mode" in
+      system)
+        if [[ "$system_ok" == "true" ]]; then
+          setup_guidance=" System OpenGrep was detected at ${system_path:-opengrep}"
+          if [[ -n "$system_version" ]]; then
+            setup_guidance="${setup_guidance} (version ${system_version})"
+          fi
+          setup_guidance="${setup_guidance}, but the active runtime is still not ready. Check greprules doctor --format json."
+        else
+          setup_guidance=" Install OpenGrep automatically is off, and no system opengrep was found on PATH. Enable automatic install in plugin configuration or set OpenGrep executable path."
+        fi
+        ;;
+      path)
+        setup_guidance=" OpenGrep executable path is set to ${configured_path:-<empty>}, but it is not usable. Update the plugin configuration with an executable OpenGrep path or clear it to use automatic install."
+        ;;
+      *)
+        setup_guidance=" Install OpenGrep automatically is enabled, but managed OpenGrep is not ready. Check greprules setup-opengrep output or set OpenGrep executable path in plugin configuration."
+        ;;
+    esac
   fi
 
   emit_context "SessionStart" "greprules needs setup before automatic scans. Registry ready: ${registry_ok:-unknown}; lockfile exists: ${lock_exists:-unknown}; OpenGrep ready: ${active_ok:-unknown}. Recommended commands: ${recommended:-greprules doctor --format json}.${managed_setup_note}${setup_guidance}"

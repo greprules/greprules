@@ -134,14 +134,6 @@ claude plugin marketplace add greprules/greprules --scope user
 claude plugin install greprules@greprules --scope user
 ```
 
-To choose the OpenGrep runtime during plugin install, pass a plugin option:
-
-```bash
-claude plugin install greprules@greprules --scope user --config opengrep_mode=system
-claude plugin install greprules@greprules --scope user --config opengrep_mode=managed
-claude plugin install greprules@greprules --scope user --config opengrep_mode=path --config opengrep_path=/absolute/path/to/opengrep
-```
-
 Then reload Claude Code and use:
 
 ```text
@@ -150,9 +142,15 @@ Then reload Claude Code and use:
 /greprules:scan
 ```
 
+During plugin installation, configure OpenGrep with:
+
+- `Install OpenGrep automatically` enabled: greprules installs and uses managed OpenGrep. This is recommended.
+- `Install OpenGrep automatically` disabled: greprules uses an existing `opengrep` on `PATH`.
+- `OpenGrep executable path`: optional advanced override. If set, this path takes precedence over both automatic install and `PATH`.
+
 The plugin includes a `bin/greprules` wrapper and lifecycle hooks tuned for agent editing:
 
-- `SessionStart`: run `doctor` and report setup gaps. If `opengrep_mode=managed` is configured and managed OpenGrep is missing, it installs managed OpenGrep automatically. It never scans.
+- `SessionStart`: run `doctor` and report setup gaps. If automatic install is enabled and managed OpenGrep is missing, install managed OpenGrep. It never scans.
 - `PostToolUse` for `Edit`, `MultiEdit`, `Write`, and `NotebookEdit`: mark the workspace dirty. It never scans.
 - `Stop`: if the workspace is dirty, run one changed-file scan and inject a compact summary into Claude's next model context.
 
@@ -164,7 +162,7 @@ system PATH, excluding the plugin wrapper itself
 GitHub Release bootstrap into $CLAUDE_PLUGIN_DATA/greprules/v0.1.0/greprules
 ```
 
-If `opengrep_mode` is unset, the plugin does not override CLI config. On session start, `greprules doctor --format json` reports setup gaps; when system OpenGrep is detected but the active runtime is not ready, Claude is instructed to ask whether to use system OpenGrep or install managed OpenGrep. If `opengrep_mode=managed` is configured, the plugin runs `greprules setup-opengrep` automatically when managed OpenGrep is missing.
+Claude Code stores plugin configuration in its settings file, such as `~/.claude/settings.json` for user-scope installs. greprules does not edit that file directly; Claude Code passes plugin options as environment variables to the wrapper and hooks.
 
 For local development before a release exists, build and copy the CLI onto `PATH`:
 

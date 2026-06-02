@@ -16,16 +16,16 @@
     "rules"
   ],
   "userConfig": {
-    "opengrep_mode": {
-      "type": "string",
-      "title": "OpenGrep setup method",
-      "description": "Choose managed for automatic OpenGrep setup, system to use an existing opengrep on PATH, or path for a specific executable. Recommended: managed.",
-      "required": false
+    "install_opengrep": {
+      "type": "boolean",
+      "title": "Install OpenGrep automatically",
+      "description": "Recommended. When enabled, greprules downloads and manages OpenGrep automatically. Turn this off to use an existing opengrep on PATH.",
+      "default": true
     },
     "opengrep_path": {
       "type": "file",
       "title": "OpenGrep executable path",
-      "description": "Required only when setup method is path. Enter the absolute path to your opengrep executable.",
+      "description": "Optional. Set this only when you want greprules to use a specific OpenGrep executable instead of automatic install or PATH lookup.",
       "required": false
     }
   }
