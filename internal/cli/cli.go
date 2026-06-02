@@ -574,8 +574,8 @@ func runScan(ctx context.Context, args []string) error {
 	sarifPath := filepath.Join(outputDir, "scan.sarif")
 	agentPath := filepath.Join(outputDir, "agent-result.json")
 	startedAt := time.Now().UTC().Format(time.RFC3339)
-	rulePath := combinedRulePath(root, lock)
-	result := baseAgentResult(root, lock, runtimeInfo, changedMode, changedFiles, targets, scanConfigList(rulePath, cfg.OpenGrep.IncludeDefaultRules), jsonPath, sarifPath)
+	scanConfigs := combinedScanConfigs(root, lock, cfg.OpenGrep.IncludeDefaultRules)
+	result := baseAgentResult(root, lock, runtimeInfo, changedMode, changedFiles, targets, scanConfigs, jsonPath, sarifPath)
 	result.Scan.StartedAt = startedAt
 	if emptyTargetsWarning != "" {
 		result.Status = "ok"
@@ -583,36 +583,49 @@ func runScan(ctx context.Context, args []string) error {
 		result.Scan.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 		return output.WriteAgentResult(agentPath, result)
 	}
-	if err := opengrep.RunScan(ctx, runtimeInfo, opengrep.ScanOptions{
-		WorkingDir:          root,
-		RulePath:            rulePath,
-		IncludeDefaultRules: cfg.OpenGrep.IncludeDefaultRules,
-		Targets:             targets,
-		OutputPath:          jsonPath,
-		Format:              "json",
-	}); err != nil {
-		result.Status = "failed"
-		result.Errors = append(result.Errors, err.Error())
-		result.Scan.FinishedAt = time.Now().UTC().Format(time.RFC3339)
-		_ = output.WriteAgentResult(agentPath, result)
+	if err := removeOutputFile(jsonPath); err != nil {
 		return err
 	}
-	findings, err := output.FindingsFromOpenGrepJSON(jsonPath)
-	if err != nil {
-		result.Warnings = append(result.Warnings, "could not parse OpenGrep JSON: "+err.Error())
+	jsonRunErr := opengrep.RunScan(ctx, runtimeInfo, opengrep.ScanOptions{
+		WorkingDir: root,
+		Configs:    scanConfigs,
+		Targets:    targets,
+		OutputPath: jsonPath,
+		Format:     "json",
+	})
+	findings, parseErr := output.FindingsFromOpenGrepJSON(jsonPath)
+	if parseErr != nil {
+		result.Warnings = append(result.Warnings, "could not parse OpenGrep JSON: "+parseErr.Error())
+		if jsonRunErr != nil {
+			result.Status = "failed"
+			result.Errors = append(result.Errors, jsonRunErr.Error())
+			result.Scan.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+			_ = output.WriteAgentResult(agentPath, result)
+			return jsonRunErr
+		}
 	} else {
 		result.Findings = findings
+		if jsonRunErr != nil {
+			result.Warnings = append(result.Warnings, openGrepRunWarning("JSON run", jsonRunErr))
+		}
+		if warnings, err := output.WarningsFromOpenGrepJSON(jsonPath); err != nil {
+			result.Warnings = append(result.Warnings, "could not parse OpenGrep diagnostics: "+err.Error())
+		} else {
+			result.Warnings = append(result.Warnings, warnings...)
+		}
 	}
 	if *sarif {
+		if err := removeOutputFile(sarifPath); err != nil {
+			return err
+		}
 		if err := opengrep.RunScan(ctx, runtimeInfo, opengrep.ScanOptions{
-			WorkingDir:          root,
-			RulePath:            rulePath,
-			IncludeDefaultRules: cfg.OpenGrep.IncludeDefaultRules,
-			Targets:             targets,
-			OutputPath:          sarifPath,
-			Format:              "sarif",
+			WorkingDir: root,
+			Configs:    scanConfigs,
+			Targets:    targets,
+			OutputPath: sarifPath,
+			Format:     "sarif",
 		}); err != nil {
-			result.Warnings = append(result.Warnings, "SARIF run failed: "+err.Error())
+			result.Warnings = append(result.Warnings, openGrepRunWarning("SARIF run", err))
 		}
 	} else {
 		result.SARIFPath = ""
@@ -945,20 +958,30 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func combinedRulePath(root string, lock config.Lock) string {
+func combinedScanConfigs(root string, lock config.Lock, includeDefaultRules bool) []string {
 	paths := make([]string, 0, len(lock.Packs))
 	for _, pack := range lock.Packs {
 		paths = append(paths, absFromRoot(root, pack.RulePath))
 	}
-	return strings.Join(paths, string(os.PathListSeparator))
+	if includeDefaultRules {
+		paths = append(paths, "auto")
+	}
+	return paths
 }
 
-func scanConfigList(rulePath string, includeDefaultRules bool) []string {
-	configs := []string{rulePath}
-	if includeDefaultRules {
-		configs = append(configs, "auto")
+func openGrepRunWarning(label string, err error) string {
+	if code, ok := opengrep.ExitCode(err); ok {
+		return fmt.Sprintf("OpenGrep %s exited with status %d; preserving findings from generated output", label, code)
 	}
-	return configs
+	return fmt.Sprintf("OpenGrep %s reported an error after writing output: %s", label, err)
+}
+
+func removeOutputFile(path string) error {
+	err := os.Remove(path)
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	return err
 }
 
 func scanTargetsFromFlags(root string, targets stringList, targetsFrom string) ([]string, bool, error) {

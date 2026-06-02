@@ -243,6 +243,168 @@ fi
 	}
 }
 
+func TestRunScanPassesEachPackAsSeparateOpenGrepConfig(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake runtime is unix-only")
+	}
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.test\n")
+	writeFile(t, filepath.Join(root, ".greprules", "cache", "packs", "pack-a", "rules", "a.yaml"), "rules: []\n")
+	writeFile(t, filepath.Join(root, ".greprules", "cache", "packs", "pack-b", "rules", "b.yaml"), "rules: []\n")
+	configLog := filepath.Join(root, "opengrep-configs.txt")
+	fakeOpenGrep := filepath.Join(root, "fake-opengrep")
+	writeFile(t, fakeOpenGrep, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'opengrep 9.8.7\n'
+  exit 0
+fi
+out=""
+configs=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --config) shift; configs="${configs}${configs:+|}$1" ;;
+    --output) shift; out="$1" ;;
+  esac
+  shift
+done
+printf '%s\n' "$configs" > "`+configLog+`"
+printf '{"results":[]}\n' > "$out"
+`)
+	if err := os.Chmod(fakeOpenGrep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.OpenGrep.Mode = "path"
+	cfg.OpenGrep.Managed = false
+	cfg.OpenGrep.Path = fakeOpenGrep
+	if err := config.SaveLocalConfig(root, cfg); err != nil {
+		t.Fatal(err)
+	}
+	lock := config.Lock{
+		SchemaVersion: config.LockSchemaVersion,
+		Registry:      "https://example.test",
+		Packs: []config.LockedPack{
+			{
+				ID:         "pack-a",
+				Version:    "build-1",
+				SHA256:     "abc",
+				RulePath:   ".greprules/cache/packs/pack-a/rules",
+				TotalRules: 1,
+			},
+			{
+				ID:         "pack-b",
+				Version:    "build-1",
+				SHA256:     "def",
+				RulePath:   ".greprules/cache/packs/pack-b/rules",
+				TotalRules: 1,
+			},
+		},
+	}
+	if err := config.SaveLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runScan(t.Context(), []string{"--root", root, "--full", "--sarif=false"}); err != nil {
+		t.Fatal(err)
+	}
+
+	configData, err := os.ReadFile(configLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	configs := strings.Split(strings.TrimSpace(string(configData)), "|")
+	if len(configs) != 3 {
+		t.Fatalf("expected two pack configs plus auto, got %q", string(configData))
+	}
+	if strings.Contains(configs[0], string(os.PathListSeparator)) || strings.Contains(configs[1], string(os.PathListSeparator)) {
+		t.Fatalf("expected separate --config args, got %q", string(configData))
+	}
+	if !strings.HasSuffix(configs[0], filepath.Join(".greprules", "cache", "packs", "pack-a", "rules")) ||
+		!strings.HasSuffix(configs[1], filepath.Join(".greprules", "cache", "packs", "pack-b", "rules")) ||
+		configs[2] != "auto" {
+		t.Fatalf("unexpected configs: %q", string(configData))
+	}
+}
+
+func TestRunScanKeepsFindingsWhenOpenGrepReturnsPartialError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake runtime is unix-only")
+	}
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.test\n")
+	writeFile(t, filepath.Join(root, ".greprules", "cache", "packs", "go-security", "rules", "example.yaml"), "rules: []\n")
+	fakeOpenGrep := filepath.Join(root, "fake-opengrep")
+	writeFile(t, fakeOpenGrep, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'opengrep 9.8.7\n'
+  exit 0
+fi
+out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output) shift; out="$1" ;;
+  esac
+  shift
+done
+printf '{"results":[{"check_id":"greprules.partial","path":"main.go","start":{"line":1,"col":1},"end":{"line":1,"col":2},"extra":{"message":"partial","severity":"WARNING","metadata":{"license":"MIT"}}}],"errors":[{"type":"Rule parse error","level":"error","path":"rules/bad.yaml","message":"bad pattern"}]}\n' > "$out"
+exit 2
+`)
+	if err := os.Chmod(fakeOpenGrep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.OpenGrep.Mode = "path"
+	cfg.OpenGrep.Managed = false
+	cfg.OpenGrep.Path = fakeOpenGrep
+	if err := config.SaveLocalConfig(root, cfg); err != nil {
+		t.Fatal(err)
+	}
+	lock := config.Lock{
+		SchemaVersion: config.LockSchemaVersion,
+		Registry:      "https://example.test",
+		Packs: []config.LockedPack{{
+			ID:         "go-security",
+			Version:    "build-1",
+			SHA256:     "abc",
+			RulePath:   ".greprules/cache/packs/go-security/rules",
+			TotalRules: 1,
+		}},
+	}
+	if err := config.SaveLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runScan(t.Context(), []string{"--root", root, "--full", "--sarif=false"}); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".greprules", "out", "agent-result.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Status   string `json:"status"`
+		Findings []struct {
+			RuleID string `json:"ruleId"`
+		} `json:"findings"`
+		Warnings []string `json:"warnings"`
+		Errors   []string `json:"errors"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "ok" || len(result.Findings) != 1 || result.Findings[0].RuleID != "greprules.partial" {
+		t.Fatalf("expected partial findings to be preserved, got %s", string(data))
+	}
+	if len(result.Errors) != 0 {
+		t.Fatalf("expected partial OpenGrep errors as warnings, got %s", string(data))
+	}
+	if !containsString(result.Warnings, "OpenGrep JSON run exited with status 2; preserving findings from generated output") ||
+		!containsWarningContaining(result.Warnings, "Rule parse error") {
+		t.Fatalf("expected exit and diagnostic warnings, got %s", string(data))
+	}
+}
+
 func TestRunInitWritesSystemEngineConfig(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.test\n")
@@ -400,7 +562,7 @@ func TestRunCleanupRemovesSelectedUserPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(cacheRoot, "greprules", "v0.1.0", "greprules"), "binary")
+	writeFile(t, filepath.Join(cacheRoot, "greprules", "v1.0.0", "greprules"), "binary")
 
 	if err := runCleanup([]string{"--config", "--plugin-cache", "--dry-run"}); err != nil {
 		t.Fatal(err)
@@ -455,6 +617,15 @@ func makePackTarball(t *testing.T) []byte {
 func containsString(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+func containsWarningContaining(values []string, target string) bool {
+	for _, value := range values {
+		if strings.Contains(value, target) {
 			return true
 		}
 	}

@@ -72,7 +72,7 @@ The selected engine is recorded in `.greprules/lock.json` and `.greprules/out/ag
 By default, greprules runs fetched greprules.io rule packs together with OpenGrep's default auto-selected rules by passing both configs to OpenGrep:
 
 ```text
-opengrep scan --config <greprules-rulepack-path> --config auto ...
+opengrep scan --config <greprules-pack-a-rules> --config <greprules-pack-b-rules> --config auto ...
 ```
 
 Disable OpenGrep default rules when you want greprules.io packs only:
@@ -80,6 +80,8 @@ Disable OpenGrep default rules when you want greprules.io packs only:
 ```bash
 greprules config set opengrep.includeDefaultRules false --global
 ```
+
+If OpenGrep writes valid JSON findings but exits non-zero because of rule parse errors or partial scan diagnostics, greprules keeps the findings and records those diagnostics as warnings in `.greprules/out/agent-result.json`.
 
 ## Agent-Friendly Configuration
 
@@ -173,7 +175,7 @@ The wrapper resolves the real CLI in this order:
 ```text
 GREPRULES_CLI_PATH
 system PATH, excluding the plugin wrapper itself
-GitHub Release bootstrap into <user-cache-dir>/greprules/claude-plugin/greprules/v0.1.0/greprules
+GitHub Release bootstrap into <user-cache-dir>/greprules/claude-plugin/greprules/v1.0.0/greprules
 ```
 
 OpenGrep runtime configuration lives in greprules config files, not Claude Code plugin settings. Use `greprules config inspect --format json` to inspect the effective configuration.
@@ -186,10 +188,10 @@ mkdir -p ~/.local/bin
 cp ./greprules ~/.local/bin/greprules
 ```
 
-After `v0.1.0` is published, the plugin can bootstrap the matching native binary from GitHub Releases and verify it against `checksums.txt`. Override the release version only for testing:
+After `v1.0.0` is published, the plugin can bootstrap the matching native binary from GitHub Releases and verify it against `checksums.txt`. Override the release version only for testing:
 
 ```bash
-export GREPRULES_VERSION=v0.1.0
+export GREPRULES_VERSION=v1.0.0
 export GREPRULES_PLUGIN_CACHE_DIR=/tmp/greprules-plugin-cache
 ```
 

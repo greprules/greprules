@@ -2,18 +2,18 @@ package opengrep
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 )
 
 type ScanOptions struct {
-	WorkingDir          string
-	RulePath            string
-	IncludeDefaultRules bool
-	Targets             []string
-	OutputPath          string
-	Format              string
+	WorkingDir string
+	Configs    []string
+	Targets    []string
+	OutputPath string
+	Format     string
 }
 
 func RunScan(ctx context.Context, runtimeInfo Runtime, options ScanOptions) error {
@@ -23,9 +23,15 @@ func RunScan(ctx context.Context, runtimeInfo Runtime, options ScanOptions) erro
 	if _, err := os.Stat(runtimeInfo.Path); err != nil {
 		return err
 	}
-	args := []string{"scan", "--config", options.RulePath}
-	if options.IncludeDefaultRules {
-		args = append(args, "--config", "auto")
+	if len(options.Configs) == 0 {
+		return fmt.Errorf("OpenGrep scan config list is empty")
+	}
+	args := []string{"scan"}
+	for _, config := range options.Configs {
+		if config == "" {
+			return fmt.Errorf("OpenGrep scan config is empty")
+		}
+		args = append(args, "--config", config)
 	}
 	switch options.Format {
 	case "json":
@@ -44,4 +50,12 @@ func RunScan(ctx context.Context, runtimeInfo Runtime, options ScanOptions) erro
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func ExitCode(err error) (int, bool) {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode(), true
+	}
+	return 0, false
 }

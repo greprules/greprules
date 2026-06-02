@@ -2,7 +2,9 @@ package output
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
+	"strings"
 )
 
 type AgentResult struct {
@@ -99,6 +101,71 @@ func FindingsFromOpenGrepJSON(path string) ([]Finding, error) {
 		})
 	}
 	return findings, nil
+}
+
+func WarningsFromOpenGrepJSON(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var raw struct {
+		Errors []map[string]any `json:"errors"`
+		Paths  struct {
+			Skipped []map[string]any `json:"skipped"`
+		} `json:"paths"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	warnings := make([]string, 0, len(raw.Errors)+len(raw.Paths.Skipped))
+	for _, diagnostic := range raw.Errors {
+		warnings = append(warnings, "OpenGrep diagnostic: "+diagnosticSummary(diagnostic))
+	}
+	for _, skipped := range raw.Paths.Skipped {
+		warnings = append(warnings, "OpenGrep skipped path: "+diagnosticSummary(skipped))
+	}
+	return warnings, nil
+}
+
+func diagnosticSummary(values map[string]any) string {
+	if len(values) == 0 {
+		return "{}"
+	}
+	keys := []string{"type", "level", "code", "path", "message", "reason"}
+	parts := []string{}
+	seen := map[string]bool{}
+	for _, key := range keys {
+		if value, ok := values[key]; ok {
+			parts = append(parts, key+"="+diagnosticValue(value))
+			seen[key] = true
+		}
+	}
+	for key, value := range values {
+		if !seen[key] {
+			parts = append(parts, key+"="+diagnosticValue(value))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func diagnosticValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case float64:
+		if typed == float64(int64(typed)) {
+			return fmt.Sprintf("%d", int64(typed))
+		}
+		return fmt.Sprintf("%g", typed)
+	case bool:
+		return fmt.Sprintf("%t", typed)
+	default:
+		data, err := json.Marshal(typed)
+		if err != nil {
+			return fmt.Sprint(typed)
+		}
+		return string(data)
+	}
 }
 
 func WriteAgentResult(path string, result AgentResult) error {

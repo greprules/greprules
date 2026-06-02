@@ -2,7 +2,7 @@
 
 This plugin teaches Claude Code how to use the local `greprules` CLI without embedding project configuration in prompts.
 
-The plugin provides a `bin/greprules` wrapper. The wrapper resolves the real CLI from `GREPRULES_CLI_PATH`, system `PATH`, or a managed GitHub Release download cached under the OS user cache directory at `greprules/claude-plugin/greprules/v0.1.0/`.
+The plugin provides a `bin/greprules` wrapper. The wrapper resolves the real CLI from `GREPRULES_CLI_PATH`, system `PATH`, or a managed GitHub Release download cached under the OS user cache directory at `greprules/claude-plugin/greprules/v1.0.0/`.
 
 The plugin does not use install-time plugin configuration. OpenGrep runtime selection is stored in the greprules CLI config, so Claude Code, terminals, and CI can share the same behavior.
 
