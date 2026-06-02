@@ -11,7 +11,8 @@ Rules:
 - Use repo-local config only for settings that are specific to this checkout and should not be committed.
 - Do not write `opengrep.path` to shared `.greprules/config.yaml`.
 - After changing config, run `greprules config inspect --format json` or `greprules doctor --format json` and summarize the effective config.
-- Do not use Claude Code plugin configuration for OpenGrep runtime selection.
+- Do not configure OpenGrep through Claude Code plugin options; this plugin intentionally has no install-time userConfig.
+- Persist OpenGrep runtime selection with `greprules config set ... --global` so Claude Code, terminals, and CI share the same setting.
 - Expose OpenGrep runtime choices as managed install, system PATH, or manual executable path.
 - If the user wants terminal or CI parity, write the setting with `greprules config set --global`.
 

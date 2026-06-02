@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -332,6 +333,75 @@ func TestRepoConfigOpenGrepPathIsIgnored(t *testing.T) {
 	}
 	if len(resolution.Warnings) == 0 {
 		t.Fatal("expected warning for ignored shared opengrep.path")
+	}
+}
+
+func TestEnsureGreprulesGitignoreAddsEntryOnce(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not available")
+	}
+	root := t.TempDir()
+	if err := exec.Command("git", "-C", root, "init").Run(); err != nil {
+		t.Skipf("git init failed: %v", err)
+	}
+	writeFile(t, filepath.Join(root, ".gitignore"), "node_modules/\n")
+
+	if err := ensureGreprulesGitignore(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureGreprulesGitignore(root); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".gitignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := gitignoreEffectiveLines(data)
+	for _, entry := range greprulesGitignoreEntries {
+		if !lines[entry] {
+			t.Fatalf("expected %s in .gitignore, got %q", entry, string(data))
+		}
+		if count := strings.Count(string(data), entry); count != 1 {
+			t.Fatalf("expected one %s entry, got %d in %q", entry, count, string(data))
+		}
+	}
+	if lines[".greprules/"] || lines[".greprules/config.yaml"] || lines[".greprules/lock.json"] {
+		t.Fatalf("should not ignore shared greprules files, got %q", string(data))
+	}
+}
+
+func TestRunCleanupRemovesSelectedUserPaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
+	userConfig := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("GREPRULES_USER_CONFIG", userConfig)
+	writeFile(t, userConfig, "{}\n")
+	cacheRoot, err := greprulesPluginCacheRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(cacheRoot, "greprules", "v0.1.0", "greprules"), "binary")
+
+	if err := runCleanup([]string{"--config", "--plugin-cache", "--dry-run"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(userConfig); err != nil {
+		t.Fatalf("dry run should keep config: %v", err)
+	}
+	if _, err := os.Stat(cacheRoot); err != nil {
+		t.Fatalf("dry run should keep cache: %v", err)
+	}
+
+	if err := runCleanup([]string{"--config", "--plugin-cache"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(userConfig); !os.IsNotExist(err) {
+		t.Fatalf("expected config removed, got err=%v", err)
+	}
+	if _, err := os.Stat(cacheRoot); !os.IsNotExist(err) {
+		t.Fatalf("expected plugin cache removed, got err=%v", err)
 	}
 }
 

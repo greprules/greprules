@@ -27,6 +27,6 @@ Fallbacks:
 - If the current directory is not a git repository, ask whether to run `greprules scan --full` or scan specific files with `greprules scan --target <path>`.
 - If the user explicitly asks for a full scan, run `greprules scan --full`.
 - If registry access fails, report the registry URL and the error from `doctor --format json`.
-- If the CLI wrapper reports that the real CLI is missing, tell the user to put `greprules` on `PATH`, set `GREPRULES_CLI_PATH`, or let the plugin bootstrap the release binary under `$CLAUDE_PLUGIN_DATA/greprules/v0.1.0/`.
+- If the CLI wrapper reports that the real CLI is missing, tell the user to put `greprules` on `PATH`, set `GREPRULES_CLI_PATH`, or let the plugin bootstrap the release binary under the greprules user cache. `GREPRULES_PLUGIN_CACHE_DIR` can override that cache only for debugging.
 
 Do not parse `.greprules/config.yaml`, `.greprules/config.local.json`, or `~/.config/greprules/config.json` manually unless the CLI command itself is failing and the user asks for debugging.

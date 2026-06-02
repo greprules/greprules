@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -70,6 +71,8 @@ func Execute(args []string, version string) int {
 		err = runScan(ctx, args[1:])
 	case "doctor":
 		err = runDoctor(ctx, args[1:])
+	case "cleanup", "uninstall":
+		err = runCleanup(args[1:])
 	default:
 		err = fmt.Errorf("unknown command: %s", args[0])
 	}
@@ -92,7 +95,8 @@ Usage:
   greprules fetch [--pack PACK]
   greprules setup-opengrep [--version latest]
   greprules scan [--changed|--full|--target PATH|--targets-from FILE] [--engine managed|system|path]
-  greprules doctor [--debug] [--engine managed|system|path]`)
+  greprules doctor [--debug] [--engine managed|system|path]
+  greprules cleanup [--config|--cache|--opengrep|--plugin-cache|--repo|--all] [--dry-run]`)
 }
 
 func runDetect(args []string) error {
@@ -137,6 +141,9 @@ func runInit(args []string) error {
 	}
 	root, err := detect.FindRepoRoot(*rootFlag)
 	if err != nil {
+		return err
+	}
+	if err := ensureGreprulesGitignore(root); err != nil {
 		return err
 	}
 	cfg := config.DefaultConfig()
@@ -358,6 +365,9 @@ func runFetch(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := ensureGreprulesGitignore(root); err != nil {
+		return err
+	}
 	cfg, err := loadOrDefaultConfig(root)
 	if err != nil {
 		return err
@@ -509,6 +519,9 @@ func runScan(ctx context.Context, args []string) error {
 	}
 	root, err := detect.FindRepoRoot(*rootFlag)
 	if err != nil {
+		return err
+	}
+	if err := ensureGreprulesGitignore(root); err != nil {
 		return err
 	}
 	cfg, err := loadOrDefaultConfig(root)
@@ -807,6 +820,52 @@ func printRuntimeText(label string, check runtimeCheck) {
 	fmt.Printf("%s: mode=%s version=%s path=%s\n", label, check.Runtime.Mode, check.Runtime.Version, check.Runtime.Path)
 }
 
+func runCleanup(args []string) error {
+	fs := flag.NewFlagSet("cleanup", flag.ContinueOnError)
+	rootFlag := fs.String("root", ".", "repo root or child path")
+	configFlag := fs.Bool("config", false, "remove user-level greprules config")
+	cacheFlag := fs.Bool("cache", false, "remove all user-level greprules caches")
+	opengrepFlag := fs.Bool("opengrep", false, "remove managed OpenGrep cache")
+	pluginCacheFlag := fs.Bool("plugin-cache", false, "remove Claude plugin CLI bootstrap cache")
+	repoFlag := fs.Bool("repo", false, "remove repo-local .greprules directory")
+	allFlag := fs.Bool("all", false, "remove user config, user caches, and repo-local .greprules")
+	purgeFlag := fs.Bool("purge", false, "remove user config and user caches")
+	dryRun := fs.Bool("dry-run", false, "print cleanup targets without deleting")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *allFlag {
+		*configFlag = true
+		*cacheFlag = true
+		*repoFlag = true
+	}
+	if *purgeFlag {
+		*configFlag = true
+		*cacheFlag = true
+	}
+
+	targets, err := cleanupTargets(*rootFlag, *configFlag, *cacheFlag, *opengrepFlag, *pluginCacheFlag, *repoFlag)
+	if err != nil {
+		return err
+	}
+	if len(targets) == 0 {
+		fmt.Println("no cleanup target selected")
+		fmt.Println("use one or more of: --config, --cache, --opengrep, --plugin-cache, --repo, --purge, --all")
+		return nil
+	}
+	for _, target := range targets {
+		if *dryRun {
+			fmt.Println("would remove", target)
+			continue
+		}
+		if err := os.RemoveAll(target); err != nil {
+			return err
+		}
+		fmt.Println("removed", target)
+	}
+	return nil
+}
+
 func loadOrDefaultConfig(root string) (config.Config, error) {
 	resolution, err := config.LoadEffectiveConfig(root)
 	if err == nil {
@@ -1028,6 +1087,152 @@ func relToRoot(root, path string) string {
 		return path
 	}
 	return rel
+}
+
+var greprulesGitignoreEntries = []string{
+	".greprules/cache/",
+	".greprules/out/",
+	".greprules/plugin-data/",
+	".greprules/config.local.json",
+}
+
+func ensureGreprulesGitignore(root string) error {
+	if !isGitWorkTree(root) {
+		return nil
+	}
+	path := filepath.Join(root, ".gitignore")
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	missing := missingGreprulesGitignoreEntries(data)
+	if len(missing) == 0 {
+		return nil
+	}
+	var builder strings.Builder
+	if len(data) > 0 {
+		builder.Write(data)
+		if !strings.HasSuffix(string(data), "\n") {
+			builder.WriteByte('\n')
+		}
+	}
+	for _, entry := range missing {
+		builder.WriteString(entry)
+		builder.WriteByte('\n')
+	}
+	return os.WriteFile(path, []byte(builder.String()), 0o644)
+}
+
+func isGitWorkTree(root string) bool {
+	out, err := exec.Command("git", "-C", root, "rev-parse", "--is-inside-work-tree").Output()
+	return err == nil && strings.TrimSpace(string(out)) == "true"
+}
+
+func missingGreprulesGitignoreEntries(data []byte) []string {
+	lines := gitignoreEffectiveLines(data)
+	if lines[".greprules"] || lines[".greprules/"] || lines[".greprules/**"] {
+		return nil
+	}
+	missing := []string{}
+	for _, entry := range greprulesGitignoreEntries {
+		if gitignoreEntryExists(lines, entry) {
+			continue
+		}
+		missing = append(missing, entry)
+	}
+	return missing
+}
+
+func gitignoreEffectiveLines(data []byte) map[string]bool {
+	lines := map[string]bool{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		lines[line] = true
+	}
+	return lines
+}
+
+func gitignoreEntryExists(lines map[string]bool, entry string) bool {
+	if lines[entry] {
+		return true
+	}
+	if strings.HasSuffix(entry, "/") && lines[strings.TrimSuffix(entry, "/")] {
+		return true
+	}
+	return false
+}
+
+func cleanupTargets(rootFlag string, removeConfig bool, removeCache bool, removeOpenGrep bool, removePluginCache bool, removeRepo bool) ([]string, error) {
+	seen := map[string]bool{}
+	targets := []string{}
+	add := func(path string) {
+		if path == "" {
+			return
+		}
+		clean := filepath.Clean(path)
+		if !seen[clean] {
+			seen[clean] = true
+			targets = append(targets, clean)
+		}
+	}
+
+	if removeConfig {
+		path, err := config.UserConfigPath()
+		if err != nil {
+			return nil, err
+		}
+		add(path)
+	}
+	if removeCache {
+		root, err := greprulesUserCacheRoot()
+		if err != nil {
+			return nil, err
+		}
+		add(root)
+	} else {
+		if removeOpenGrep {
+			root, err := opengrep.DefaultCacheRoot()
+			if err != nil {
+				return nil, err
+			}
+			add(root)
+		}
+		if removePluginCache {
+			root, err := greprulesPluginCacheRoot()
+			if err != nil {
+				return nil, err
+			}
+			add(root)
+		}
+	}
+	if removeRepo {
+		root, err := detect.FindRepoRoot(rootFlag)
+		if err != nil {
+			return nil, err
+		}
+		add(filepath.Join(root, ".greprules"))
+	}
+	sort.Strings(targets)
+	return targets, nil
+}
+
+func greprulesUserCacheRoot() (string, error) {
+	root, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "greprules"), nil
+}
+
+func greprulesPluginCacheRoot() (string, error) {
+	root, err := greprulesUserCacheRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "claude-plugin"), nil
 }
 
 func writeConfigPatch(path string, format string, schemaVersion string, values map[string]string) error {

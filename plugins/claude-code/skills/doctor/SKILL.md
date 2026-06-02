@@ -17,6 +17,6 @@ Workflow:
 6. Use AskUserQuestion when available for the runtime choice. If it is not available, ask one concise question and wait.
 7. Apply the selected setup with `greprules config set ... --global`; for managed mode also run `greprules setup-opengrep`.
 8. Run `greprules doctor --format json` again and summarize readiness.
-9. If the CLI wrapper reports that the real CLI is missing, tell the user to put `greprules` on `PATH`, set `GREPRULES_CLI_PATH`, or let the plugin bootstrap the release binary under `$CLAUDE_PLUGIN_DATA/greprules/v0.1.0/`.
+9. If the CLI wrapper reports that the real CLI is missing, tell the user to put `greprules` on `PATH`, set `GREPRULES_CLI_PATH`, or let the plugin bootstrap the release binary under the greprules user cache. `GREPRULES_PLUGIN_CACHE_DIR` can override that cache only for debugging.
 
 Do not run `greprules fetch` or `greprules scan` from this skill unless the user explicitly asks for that follow-up.

@@ -100,13 +100,46 @@ PY
   return 1
 }
 
-bootstrap_managed_binary() {
-  local data_dir="${CLAUDE_PLUGIN_DATA:-}"
-  if [[ -z "$data_dir" ]]; then
-    return 1
+plugin_cache_dir() {
+  if [[ -n "${GREPRULES_PLUGIN_CACHE_DIR:-}" ]]; then
+    printf '%s' "$GREPRULES_PLUGIN_CACHE_DIR"
+    return
   fi
 
-  local os arch ext archive asset_url checksum_url version_dir tmp_dir archive_path checksums_path expected actual
+  case "$(uname -s)" in
+    Darwin)
+      [[ -n "${HOME:-}" ]] || return 1
+      printf '%s' "${HOME}/Library/Caches/greprules/claude-plugin"
+      ;;
+    Linux)
+      if [[ -n "${XDG_CACHE_HOME:-}" ]]; then
+        printf '%s' "${XDG_CACHE_HOME}/greprules/claude-plugin"
+      elif [[ -n "${HOME:-}" ]]; then
+        printf '%s' "${HOME}/.cache/greprules/claude-plugin"
+      else
+        printf '%s' "${TMPDIR:-/tmp}/greprules/claude-plugin"
+      fi
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      local base="${LOCALAPPDATA:-}"
+      if [[ -z "$base" && -n "${HOME:-}" ]]; then
+        base="${HOME}/AppData/Local"
+      fi
+      [[ -n "$base" ]] || return 1
+      if command -v cygpath >/dev/null 2>&1; then
+        base="$(cygpath -u "$base")"
+      fi
+      printf '%s' "${base}/greprules/Cache/claude-plugin"
+      ;;
+    *)
+      printf '%s' "${TMPDIR:-/tmp}/greprules/claude-plugin"
+      ;;
+  esac
+}
+
+bootstrap_managed_binary() {
+  local cache_dir os arch ext archive asset_url checksum_url version_dir tmp_dir archive_path checksums_path expected actual
+  cache_dir="$(plugin_cache_dir)" || return 1
   os="$(platform_os)" || return 1
   arch="$(platform_arch)" || return 1
   local archive_version="${GREPRULES_VERSION#v}"
@@ -115,7 +148,7 @@ bootstrap_managed_binary() {
     ext="zip"
   fi
 
-  version_dir="${data_dir}/greprules/${GREPRULES_VERSION}"
+  version_dir="${cache_dir}/greprules/${GREPRULES_VERSION}"
   mkdir -p "$version_dir" || return 1
 
   local managed_binary="${version_dir}/greprules"
@@ -197,6 +230,6 @@ Install or build greprules, then either:
   - put it on PATH, or
   - set GREPRULES_CLI_PATH=/absolute/path/to/greprules, or
   - allow the plugin to download ${GREPRULES_REPO} ${GREPRULES_VERSION}, or
-  - place an executable at \$CLAUDE_PLUGIN_DATA/greprules/${GREPRULES_VERSION}/greprules.
+  - set GREPRULES_PLUGIN_CACHE_DIR to a writable cache directory.
 EOF
 exit 127

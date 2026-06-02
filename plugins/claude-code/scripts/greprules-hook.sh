@@ -5,7 +5,16 @@ MODE="${1:-scan-if-dirty}"
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
 GREPRULES="${PLUGIN_ROOT}/bin/greprules"
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
-STATE_DIR="${CLAUDE_PLUGIN_DATA:-${PROJECT_DIR}/.greprules/plugin-data}"
+
+plugin_state_dir() {
+  if [[ -n "${GREPRULES_PLUGIN_STATE_DIR:-}" ]]; then
+    printf '%s' "$GREPRULES_PLUGIN_STATE_DIR"
+    return
+  fi
+  printf '%s' "${PROJECT_DIR}/.greprules/plugin-data/claude-code"
+}
+
+STATE_DIR="$(plugin_state_dir)"
 LOG_PATH="${STATE_DIR}/hook.log"
 DIRTY_MARKER="${STATE_DIR}/dirty"
 DIRTY_FILES_PATH="${STATE_DIR}/dirty-files"

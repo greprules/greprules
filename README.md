@@ -35,6 +35,7 @@ greprules scan --target path/to/file
 greprules scan --targets-from .greprules/out/targets.txt
 greprules scan --full
 greprules doctor --format json
+greprules cleanup --plugin-cache --dry-run
 ```
 
 ## OpenGrep Runtime Policy
@@ -157,7 +158,7 @@ The wrapper resolves the real CLI in this order:
 ```text
 GREPRULES_CLI_PATH
 system PATH, excluding the plugin wrapper itself
-GitHub Release bootstrap into $CLAUDE_PLUGIN_DATA/greprules/v0.1.0/greprules
+GitHub Release bootstrap into <user-cache-dir>/greprules/claude-plugin/greprules/v0.1.0/greprules
 ```
 
 OpenGrep runtime configuration lives in greprules config files, not Claude Code plugin settings. Use `greprules config inspect --format json` to inspect the effective configuration.
@@ -174,6 +175,7 @@ After `v0.1.0` is published, the plugin can bootstrap the matching native binary
 
 ```bash
 export GREPRULES_VERSION=v0.1.0
+export GREPRULES_PLUGIN_CACHE_DIR=/tmp/greprules-plugin-cache
 ```
 
 To disable the automatic hook in a Claude Code session:
@@ -201,10 +203,36 @@ export GREPRULES_AUTO_SCAN_MAX_CHANGED_FILES=100
 .greprules/out/agent-result.json
 ```
 
+When greprules runs in a git repository, it automatically adds generated/local paths to the project `.gitignore`:
+
+```text
+.greprules/cache/
+.greprules/out/
+.greprules/plugin-data/
+.greprules/config.local.json
+```
+
+Shared project files such as `.greprules/config.yaml` and `.greprules/lock.json` are not ignored automatically.
+
 Managed OpenGrep binaries are stored under the OS user cache directory:
 
 ```text
 <user-cache-dir>/greprules/opengrep/<version>/opengrep
+```
+
+The Claude Code wrapper bootstrap cache is stored separately:
+
+```text
+<user-cache-dir>/greprules/claude-plugin/greprules/<version>/greprules
+```
+
+Cleanup is explicit. User config and caches are intentionally left in place on plugin uninstall, but can be removed when needed:
+
+```bash
+greprules cleanup --config --plugin-cache --dry-run
+greprules cleanup --config --plugin-cache
+greprules cleanup --purge
+greprules cleanup --repo
 ```
 
 ## Development
