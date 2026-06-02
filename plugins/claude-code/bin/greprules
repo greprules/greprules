@@ -74,17 +74,27 @@ PY
 download_file() {
   local url="$1"
   local destination="$2"
+  local token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$url" -o "$destination"
+    if [[ -n "$token" ]]; then
+      curl -fsSL -H "Authorization: Bearer ${token}" "$url" -o "$destination"
+    else
+      curl -fsSL "$url" -o "$destination"
+    fi
     return
   fi
   if command -v python3 >/dev/null 2>&1; then
-    python3 - "$url" "$destination" <<'PY'
+    GH_DOWNLOAD_TOKEN="$token" python3 - "$url" "$destination" <<'PY'
+import os
 import sys
 import urllib.request
 
 url, destination = sys.argv[1], sys.argv[2]
-with urllib.request.urlopen(url, timeout=120) as response:
+request = urllib.request.Request(url)
+token = os.environ.get("GH_DOWNLOAD_TOKEN")
+if token:
+    request.add_header("Authorization", f"Bearer {token}")
+with urllib.request.urlopen(request, timeout=120) as response:
     data = response.read()
 with open(destination, "wb") as handle:
     handle.write(data)
@@ -103,6 +113,7 @@ bootstrap_managed_binary() {
   local os arch ext archive asset_url checksum_url version_dir tmp_dir archive_path checksums_path expected actual
   os="$(platform_os)" || return 1
   arch="$(platform_arch)" || return 1
+  local archive_version="${GREPRULES_VERSION#v}"
   ext="tar.gz"
   if [[ "$os" == "windows" ]]; then
     ext="zip"
@@ -119,7 +130,7 @@ bootstrap_managed_binary() {
     exec "$managed_binary" "$@"
   fi
 
-  archive="greprules_${GREPRULES_VERSION}_${os}_${arch}.${ext}"
+  archive="greprules_${archive_version}_${os}_${arch}.${ext}"
   asset_url="https://github.com/${GREPRULES_REPO}/releases/download/${GREPRULES_VERSION}/${archive}"
   checksum_url="https://github.com/${GREPRULES_REPO}/releases/download/${GREPRULES_VERSION}/checksums.txt"
   tmp_dir="$(mktemp -d)"
