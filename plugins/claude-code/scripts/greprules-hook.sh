@@ -192,7 +192,7 @@ doctor_context() {
   system_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.system.ok" 2>/dev/null || true)"
   system_path="$(printf '%s' "$doctor_output" | json_field "opengrep.system.runtime.path" 2>/dev/null || true)"
   system_version="$(printf '%s' "$doctor_output" | json_field "opengrep.system.runtime.version" 2>/dev/null || true)"
-  plugin_mode="${CLAUDE_PLUGIN_OPTION_OPENGREP_MODE:-${CLAUDE_PLUGIN_OPTION_opengrep_mode:-auto}}"
+  plugin_mode="${CLAUDE_PLUGIN_OPTION_OPENGREP_MODE:-${CLAUDE_PLUGIN_OPTION_opengrep_mode:-}}"
 
   if [[ "$registry_ok" == "true" && "$lock_exists" == "true" && "$active_ok" == "true" ]]; then
     log_msg "doctor ok"
@@ -205,7 +205,7 @@ doctor_context() {
     if [[ -n "$system_version" ]]; then
       setup_guidance="${setup_guidance} (version ${system_version})"
     fi
-    setup_guidance="${setup_guidance}. Ask the user whether to use system OpenGrep or install managed OpenGrep. If they choose system, run greprules config set opengrep.mode system --global. If they choose managed, run greprules setup-opengrep. Current plugin opengrep_mode option: ${plugin_mode:-auto}."
+    setup_guidance="${setup_guidance}. Ask the user whether to use system OpenGrep or install managed OpenGrep. If they choose system, run greprules config set opengrep.mode system --global. If they choose managed, run greprules setup-opengrep. Current plugin opengrep_mode option: ${plugin_mode:-unset}."
   fi
 
   emit_context "SessionStart" "greprules needs setup before automatic scans. Registry ready: ${registry_ok:-unknown}; lockfile exists: ${lock_exists:-unknown}; OpenGrep ready: ${active_ok:-unknown}. Recommended commands: ${recommended:-greprules doctor --format json}.${setup_guidance}"

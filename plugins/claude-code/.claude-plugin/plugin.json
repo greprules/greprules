@@ -19,8 +19,8 @@
     "opengrep_mode": {
       "type": "string",
       "title": "OpenGrep runtime mode",
-      "description": "OpenGrep runtime for greprules in Claude Code. Use auto, managed, system, or path.",
-      "default": "auto"
+      "description": "OpenGrep runtime for greprules in Claude Code. Choose managed, system, or path. Leave unset to use greprules CLI config and first-session setup guidance.",
+      "required": false
     },
     "opengrep_path": {
       "type": "file",

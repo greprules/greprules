@@ -15,7 +15,7 @@ apply_plugin_options() {
     managed|system|path)
       export GREPRULES_ENGINE="$mode"
       ;;
-    ""|auto)
+    "")
       ;;
     *)
       printf 'warning: ignoring unsupported greprules opengrep_mode plugin option: %s\n' "$mode" >&2

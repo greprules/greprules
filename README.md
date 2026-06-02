@@ -164,7 +164,7 @@ system PATH, excluding the plugin wrapper itself
 GitHub Release bootstrap into $CLAUDE_PLUGIN_DATA/greprules/v0.1.0/greprules
 ```
 
-If `opengrep_mode` is left as `auto`, the plugin does not override CLI config. On session start, `greprules doctor --format json` reports setup gaps; when system OpenGrep is detected but the active runtime is not ready, Claude is instructed to ask whether to use system OpenGrep or install managed OpenGrep.
+If `opengrep_mode` is unset, the plugin does not override CLI config. On session start, `greprules doctor --format json` reports setup gaps; when system OpenGrep is detected but the active runtime is not ready, Claude is instructed to ask whether to use system OpenGrep or install managed OpenGrep.
 
 For local development before a release exists, build and copy the CLI onto `PATH`:
 

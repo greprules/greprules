@@ -11,7 +11,8 @@ Rules:
 - Use repo-local config only for settings that are specific to this checkout and should not be committed.
 - Do not write `opengrep.path` to shared `.greprules/config.yaml`.
 - After changing config, run `greprules config inspect --format json` and summarize the effective config.
-- Claude Code plugin options are available as `opengrep_mode` and `opengrep_path`. A non-`auto` plugin option overrides the CLI config only inside Claude Code plugin subprocesses.
+- Claude Code plugin options are available as `opengrep_mode` and `opengrep_path`. If `opengrep_mode` is unset, the plugin does not override CLI config and uses first-session setup guidance.
+- Expose `opengrep_mode` as `managed`, `system`, or advanced `path`; do not present `auto` as a user choice.
 - If the user wants the same behavior in terminals or CI, write the setting with `greprules config set --global` instead of relying only on plugin options.
 
 Common commands:
