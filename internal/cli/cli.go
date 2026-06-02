@@ -238,7 +238,7 @@ func runConfigInspect(args []string) error {
 		return printJSON(resolution)
 	}
 	fmt.Println("registry:", resolution.Config.Registry)
-	fmt.Printf("opengrep: mode=%s version=%s", resolution.Config.OpenGrep.Mode, resolution.Config.OpenGrep.Version)
+	fmt.Printf("opengrep: mode=%s version=%s includeDefaultRules=%t", resolution.Config.OpenGrep.Mode, resolution.Config.OpenGrep.Version, resolution.Config.OpenGrep.IncludeDefaultRules)
 	if resolution.Config.OpenGrep.Path != "" {
 		fmt.Printf(" path=%s", resolution.Config.OpenGrep.Path)
 	}
@@ -574,7 +574,8 @@ func runScan(ctx context.Context, args []string) error {
 	sarifPath := filepath.Join(outputDir, "scan.sarif")
 	agentPath := filepath.Join(outputDir, "agent-result.json")
 	startedAt := time.Now().UTC().Format(time.RFC3339)
-	result := baseAgentResult(root, lock, runtimeInfo, changedMode, changedFiles, targets, jsonPath, sarifPath)
+	rulePath := combinedRulePath(root, lock)
+	result := baseAgentResult(root, lock, runtimeInfo, changedMode, changedFiles, targets, scanConfigList(rulePath, cfg.OpenGrep.IncludeDefaultRules), jsonPath, sarifPath)
 	result.Scan.StartedAt = startedAt
 	if emptyTargetsWarning != "" {
 		result.Status = "ok"
@@ -582,13 +583,13 @@ func runScan(ctx context.Context, args []string) error {
 		result.Scan.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 		return output.WriteAgentResult(agentPath, result)
 	}
-	rulePath := combinedRulePath(root, lock)
 	if err := opengrep.RunScan(ctx, runtimeInfo, opengrep.ScanOptions{
-		WorkingDir: root,
-		RulePath:   rulePath,
-		Targets:    targets,
-		OutputPath: jsonPath,
-		Format:     "json",
+		WorkingDir:          root,
+		RulePath:            rulePath,
+		IncludeDefaultRules: cfg.OpenGrep.IncludeDefaultRules,
+		Targets:             targets,
+		OutputPath:          jsonPath,
+		Format:              "json",
 	}); err != nil {
 		result.Status = "failed"
 		result.Errors = append(result.Errors, err.Error())
@@ -604,11 +605,12 @@ func runScan(ctx context.Context, args []string) error {
 	}
 	if *sarif {
 		if err := opengrep.RunScan(ctx, runtimeInfo, opengrep.ScanOptions{
-			WorkingDir: root,
-			RulePath:   rulePath,
-			Targets:    targets,
-			OutputPath: sarifPath,
-			Format:     "sarif",
+			WorkingDir:          root,
+			RulePath:            rulePath,
+			IncludeDefaultRules: cfg.OpenGrep.IncludeDefaultRules,
+			Targets:             targets,
+			OutputPath:          sarifPath,
+			Format:              "sarif",
 		}); err != nil {
 			result.Warnings = append(result.Warnings, "SARIF run failed: "+err.Error())
 		}
@@ -951,6 +953,14 @@ func combinedRulePath(root string, lock config.Lock) string {
 	return strings.Join(paths, string(os.PathListSeparator))
 }
 
+func scanConfigList(rulePath string, includeDefaultRules bool) []string {
+	configs := []string{rulePath}
+	if includeDefaultRules {
+		configs = append(configs, "auto")
+	}
+	return configs
+}
+
 func scanTargetsFromFlags(root string, targets stringList, targetsFrom string) ([]string, bool, error) {
 	rawTargets := append([]string{}, targets...)
 	explicitMode := len(rawTargets) > 0 || targetsFrom != ""
@@ -1036,7 +1046,7 @@ func normalizeScanTarget(root string, raw string) (string, error) {
 	return target, nil
 }
 
-func baseAgentResult(root string, lock config.Lock, runtimeInfo opengrep.Runtime, changedMode bool, changedFiles []string, targets []string, jsonPath string, sarifPath string) output.AgentResult {
+func baseAgentResult(root string, lock config.Lock, runtimeInfo opengrep.Runtime, changedMode bool, changedFiles []string, targets []string, scanConfigs []string, jsonPath string, sarifPath string) output.AgentResult {
 	packs := make([]output.PackInfo, 0, len(lock.Packs))
 	for _, pack := range lock.Packs {
 		packs = append(packs, output.PackInfo{
@@ -1067,6 +1077,7 @@ func baseAgentResult(root string, lock config.Lock, runtimeInfo opengrep.Runtime
 		},
 		Scan: output.ScanInfo{
 			Targets: targets,
+			Configs: scanConfigs,
 		},
 		Findings:  []output.Finding{},
 		JSONPath:  relToRoot(root, jsonPath),
@@ -1345,7 +1356,7 @@ func parseConfigValue(key string, raw string) (any, error) {
 			}
 		}
 		return values, nil
-	case "scan.changedDefault", "scan.sarif", "scan.agentJson", "opengrep.managed":
+	case "scan.changedDefault", "scan.sarif", "scan.agentJson", "opengrep.managed", "opengrep.includeDefaultRules":
 		return strconv.ParseBool(raw)
 	}
 	return raw, nil
@@ -1382,6 +1393,7 @@ func validConfigKey(key string) bool {
 		"scan.sarif",
 		"scan.agentJson",
 		"opengrep.managed",
+		"opengrep.includeDefaultRules",
 		"opengrep.mode",
 		"opengrep.path",
 		"opengrep.version":

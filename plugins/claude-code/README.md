@@ -6,6 +6,8 @@ The plugin provides a `bin/greprules` wrapper. The wrapper resolves the real CLI
 
 The plugin does not use install-time plugin configuration. OpenGrep runtime selection is stored in the greprules CLI config, so Claude Code, terminals, and CI can share the same behavior.
 
+greprules includes OpenGrep default auto-selected rules by default. Disable them with `greprules config set opengrep.includeDefaultRules false --global` when a scan should use only greprules.io packs.
+
 It uses structured CLI outputs:
 
 - `greprules config inspect --format json`

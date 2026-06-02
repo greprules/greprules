@@ -21,6 +21,8 @@ Primary workflow:
 10. Summarize findings by rule id, severity, file, line, and message.
 11. Propose code fixes for true-positive-looking findings, but do not upload rules or create rule drafts.
 
+OpenGrep default rules are included by default. If the user asks to scan only greprules.io rule packs, run `greprules config set opengrep.includeDefaultRules false --global` before scanning and verify with `greprules config inspect --format json`.
+
 Fallbacks:
 
 - If there are no changed files, report that the changed-file scan found no targets and ask whether to run `greprules scan --full`.

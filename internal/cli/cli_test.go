@@ -142,6 +142,7 @@ func TestRunScanUsesExplicitTargetsFromFile(t *testing.T) {
 	targetsFrom := filepath.Join(root, "targets.txt")
 	writeFile(t, targetsFrom, "b.go\na.go\nb.go\n\n")
 	targetLog := filepath.Join(root, "opengrep-targets.txt")
+	configLog := filepath.Join(root, "opengrep-configs.txt")
 	fakeOpenGrep := filepath.Join(root, "fake-opengrep")
 	writeFile(t, fakeOpenGrep, `#!/bin/sh
 if [ "$1" = "--version" ]; then
@@ -151,10 +152,11 @@ fi
 out=""
 fmt="json"
 targets=""
+configs=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     scan) ;;
-    --config) shift ;;
+    --config) shift; configs="${configs}${configs:+ }$1" ;;
     --output) shift; out="$1" ;;
     --json) fmt="json" ;;
     --sarif) fmt="sarif" ;;
@@ -164,6 +166,7 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 printf '%s\n' "$targets" >> "`+targetLog+`"
+printf '%s\n' "$configs" >> "`+configLog+`"
 if [ "$fmt" = "sarif" ]; then
   printf '{"version":"2.1.0","runs":[]}\n' > "$out"
 else
@@ -228,6 +231,16 @@ fi
 	if !strings.Contains(string(logData), "a.go b.go") {
 		t.Fatalf("expected explicit targets in opengrep invocation, got %q", string(logData))
 	}
+	configData, err := os.ReadFile(configLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(configData), " auto") {
+		t.Fatalf("expected opengrep default rule config in invocation, got %q", string(configData))
+	}
+	if !strings.Contains(string(data), "\"configs\"") || !strings.Contains(string(data), "\"auto\"") {
+		t.Fatalf("expected agent result to record scan configs, got %s", string(data))
+	}
 }
 
 func TestRunInitWritesSystemEngineConfig(t *testing.T) {
@@ -257,11 +270,16 @@ func TestConfigSetGlobalAndInspect(t *testing.T) {
 	if err := runConfigSet([]string{"--root", root, "registry", "http://localhost:8787", "--global"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := runConfigSet([]string{"--root", root, "opengrep.includeDefaultRules", "false", "--global"}); err != nil {
+		t.Fatal(err)
+	}
 	resolution, err := config.LoadEffectiveConfig(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolution.Config.OpenGrep.Mode != "system" || resolution.Config.Registry != "http://localhost:8787" {
+	if resolution.Config.OpenGrep.Mode != "system" ||
+		resolution.Config.Registry != "http://localhost:8787" ||
+		resolution.Config.OpenGrep.IncludeDefaultRules {
 		t.Fatalf("unexpected effective config: %#v", resolution.Config)
 	}
 	if _, err := os.Stat(userConfig); err != nil {

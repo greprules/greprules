@@ -14,6 +14,7 @@ Rules:
 - Do not configure OpenGrep through Claude Code plugin options; this plugin intentionally has no install-time userConfig.
 - Persist OpenGrep runtime selection with `greprules config set ... --global` so Claude Code, terminals, and CI share the same setting.
 - Expose OpenGrep runtime choices as managed install, system PATH, or manual executable path.
+- OpenGrep default rules are included by default with `opengrep.includeDefaultRules=true`; only change this if the user asks for greprules.io packs only.
 - If the user wants terminal or CI parity, write the setting with `greprules config set --global`.
 
 Common commands:
@@ -24,6 +25,7 @@ greprules config set opengrep.mode system --global
 greprules config set opengrep.mode managed --global
 greprules config set opengrep.mode path --global
 greprules config set opengrep.path /absolute/path/to/opengrep --global
+greprules config set opengrep.includeDefaultRules false --global
 greprules config inspect --format json
 greprules doctor --format json
 ```

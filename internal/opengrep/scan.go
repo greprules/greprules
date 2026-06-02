@@ -8,11 +8,12 @@ import (
 )
 
 type ScanOptions struct {
-	WorkingDir string
-	RulePath   string
-	Targets    []string
-	OutputPath string
-	Format     string
+	WorkingDir          string
+	RulePath            string
+	IncludeDefaultRules bool
+	Targets             []string
+	OutputPath          string
+	Format              string
 }
 
 func RunScan(ctx context.Context, runtimeInfo Runtime, options ScanOptions) error {
@@ -23,6 +24,9 @@ func RunScan(ctx context.Context, runtimeInfo Runtime, options ScanOptions) erro
 		return err
 	}
 	args := []string{"scan", "--config", options.RulePath}
+	if options.IncludeDefaultRules {
+		args = append(args, "--config", "auto")
+	}
 	switch options.Format {
 	case "json":
 		args = append(args, "--json")

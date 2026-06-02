@@ -47,6 +47,7 @@ type ScanInfo struct {
 	StartedAt  string   `json:"startedAt,omitempty"`
 	FinishedAt string   `json:"finishedAt,omitempty"`
 	Targets    []string `json:"targets"`
+	Configs    []string `json:"configs,omitempty"`
 }
 
 type Finding struct {

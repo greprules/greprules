@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,10 +40,11 @@ type ScanConfig struct {
 }
 
 type EngineConfig struct {
-	Managed bool   `json:"managed" yaml:"managed"`
-	Mode    string `json:"mode" yaml:"mode"`
-	Version string `json:"version" yaml:"version"`
-	Path    string `json:"path" yaml:"path"`
+	Managed             bool   `json:"managed" yaml:"managed"`
+	Mode                string `json:"mode" yaml:"mode"`
+	Version             string `json:"version" yaml:"version"`
+	Path                string `json:"path" yaml:"path"`
+	IncludeDefaultRules bool   `json:"includeDefaultRules" yaml:"includeDefaultRules"`
 }
 
 type ConfigResolution struct {
@@ -78,10 +80,11 @@ type ScanConfigPatch struct {
 }
 
 type EngineConfigPatch struct {
-	Managed *bool   `json:"managed" yaml:"managed"`
-	Mode    *string `json:"mode" yaml:"mode"`
-	Version *string `json:"version" yaml:"version"`
-	Path    *string `json:"path" yaml:"path"`
+	Managed             *bool   `json:"managed" yaml:"managed"`
+	Mode                *string `json:"mode" yaml:"mode"`
+	Version             *string `json:"version" yaml:"version"`
+	Path                *string `json:"path" yaml:"path"`
+	IncludeDefaultRules *bool   `json:"includeDefaultRules" yaml:"includeDefaultRules"`
 }
 
 type Lock struct {
@@ -136,10 +139,11 @@ func DefaultConfig() Config {
 			AgentJSON:      true,
 		},
 		OpenGrep: EngineConfig{
-			Managed: true,
-			Mode:    "managed",
-			Version: "latest",
-			Path:    "",
+			Managed:             true,
+			Mode:                "managed",
+			Version:             "latest",
+			Path:                "",
+			IncludeDefaultRules: true,
 		},
 	}
 }
@@ -407,6 +411,9 @@ func applyPatch(cfg *Config, patch ConfigPatch, scope string, allowEnginePath bo
 			warnings = append(warnings, scope+" config opengrep.path ignored; put executable paths in global config, local config, env, or CLI flags")
 		}
 	}
+	if patch.OpenGrep.IncludeDefaultRules != nil {
+		cfg.OpenGrep.IncludeDefaultRules = *patch.OpenGrep.IncludeDefaultRules
+	}
 	normalizeConfig(cfg)
 	return warnings
 }
@@ -427,6 +434,14 @@ func applyEnv(cfg *Config) []string {
 	}
 	if value := os.Getenv("GREPRULES_OPENGREP_VERSION"); value != "" {
 		cfg.OpenGrep.Version = value
+	}
+	if value := os.Getenv("GREPRULES_OPENGREP_INCLUDE_DEFAULT_RULES"); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			warnings = append(warnings, "GREPRULES_OPENGREP_INCLUDE_DEFAULT_RULES ignored; expected boolean")
+		} else {
+			cfg.OpenGrep.IncludeDefaultRules = parsed
+		}
 	}
 	if value := os.Getenv("GREPRULES_CACHE_DIR"); value != "" {
 		cfg.CacheDir = value

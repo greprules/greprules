@@ -27,6 +27,7 @@ greprules detect --format json
 greprules init --mode auto
 greprules config inspect --format json
 greprules config set opengrep.mode system --global
+greprules config set opengrep.includeDefaultRules false --global
 greprules recommend
 greprules fetch
 greprules setup-opengrep
@@ -68,6 +69,18 @@ greprules scan --engine path --opengrep-path /opt/homebrew/bin/opengrep --full
 
 The selected engine is recorded in `.greprules/lock.json` and `.greprules/out/agent-result.json` with its mode, source, path, version, and SHA-256.
 
+By default, greprules runs fetched greprules.io rule packs together with OpenGrep's default auto-selected rules by passing both configs to OpenGrep:
+
+```text
+opengrep scan --config <greprules-rulepack-path> --config auto ...
+```
+
+Disable OpenGrep default rules when you want greprules.io packs only:
+
+```bash
+greprules config set opengrep.includeDefaultRules false --global
+```
+
 ## Agent-Friendly Configuration
 
 Agent plugins should write structured config once, then run the CLI without carrying config details in prompts.
@@ -92,7 +105,8 @@ User/global config is JSON so plugin UIs can write it directly:
   "opengrep": {
     "mode": "system",
     "path": "/Users/l0ch/.local/bin/opengrep",
-    "version": "latest"
+    "version": "latest",
+    "includeDefaultRules": true
   }
 }
 ```
@@ -121,6 +135,7 @@ Recommended plugin flow:
 ```bash
 greprules config set registry http://localhost:8787 --global
 greprules config set opengrep.mode system --global
+greprules config set opengrep.includeDefaultRules true --global
 greprules doctor --format json
 greprules fetch
 greprules scan --changed
