@@ -167,15 +167,17 @@ The plugin does not require install-time configuration. When `/greprules:doctor`
 The plugin includes a `bin/greprules` wrapper and lifecycle hooks tuned for agent editing:
 
 - `SessionStart`: run `doctor` and report setup gaps. It never installs OpenGrep or scans.
-- `PostToolUse` for `Edit`, `MultiEdit`, `Write`, and `NotebookEdit`: capture the file path from Claude's actual edit event and mark the workspace dirty. It never scans.
-- `Stop`: if the workspace is dirty, scan the files Claude actually edited, then block the stop once with a compact verification prompt so Claude reviews the scan result before finishing. This does not require a git repository.
+- `PostToolUse` for `Edit`, `MultiEdit`, `Write`, and `NotebookEdit`: capture file paths from Claude's actual edit event, keep only code and security-relevant config candidates, and mark the workspace dirty. It never scans.
+- `Stop`: if the workspace is dirty, scan the files Claude actually edited, then block the stop once with a compact verification prompt so Claude reviews the scan result before finishing. Automatic scan state is one-shot; terminal skip and failure paths clear the pending marker so stale edits do not trigger scans in later unrelated turns. This does not require a git repository.
+
+Claude Code hooks call `bin/greprules claude-hook ...`; the wrapper only resolves or downloads the real CLI, while hook JSON parsing, file filtering, scan lifecycle, and StopBlock output are implemented in the Go CLI.
 
 The wrapper resolves the real CLI in this order:
 
 ```text
 GREPRULES_CLI_PATH
 system PATH, excluding the plugin wrapper itself
-GitHub Release bootstrap into <user-cache-dir>/greprules/claude-plugin/greprules/v0.1.0/greprules
+GitHub Release bootstrap into <user-cache-dir>/greprules/claude-plugin/greprules/v0.1.1/greprules
 ```
 
 OpenGrep runtime configuration lives in greprules config files, not Claude Code plugin settings. Use `greprules config inspect --format json` to inspect the effective configuration.
@@ -188,10 +190,10 @@ mkdir -p ~/.local/bin
 cp ./greprules ~/.local/bin/greprules
 ```
 
-After `v0.1.0` is published, the plugin can bootstrap the matching native binary from GitHub Releases and verify it against `checksums.txt`. Override the release version only for testing:
+After `v0.1.1` is published, the plugin can bootstrap the matching native binary from GitHub Releases and verify it against `checksums.txt`. Override the release version only for testing:
 
 ```bash
-export GREPRULES_VERSION=v0.1.0
+export GREPRULES_VERSION=v0.1.1
 export GREPRULES_PLUGIN_CACHE_DIR=/tmp/greprules-plugin-cache
 ```
 

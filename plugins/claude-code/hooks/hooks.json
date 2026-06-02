@@ -6,8 +6,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/greprules-hook.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/greprules",
             "args": [
+              "claude-hook",
               "mark-dirty"
             ]
           }
@@ -19,8 +20,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/greprules-hook.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/greprules",
             "args": [
+              "claude-hook",
               "scan-if-dirty"
             ]
           }
@@ -32,8 +34,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/greprules-hook.sh",
+            "command": "${CLAUDE_PLUGIN_ROOT}/bin/greprules",
             "args": [
+              "claude-hook",
               "doctor"
             ]
           }

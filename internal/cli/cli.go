@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -71,6 +72,8 @@ func Execute(args []string, version string) int {
 		err = runScan(ctx, args[1:])
 	case "doctor":
 		err = runDoctor(ctx, args[1:])
+	case "claude-hook":
+		err = runClaudeHook(ctx, args[1:])
 	case "cleanup", "uninstall":
 		err = runCleanup(args[1:])
 	default:
@@ -96,6 +99,7 @@ Usage:
   greprules setup-opengrep [--version latest]
   greprules scan [--changed|--full|--target PATH|--targets-from FILE] [--engine managed|system|path]
   greprules doctor [--debug] [--engine managed|system|path]
+  greprules claude-hook mark-dirty|scan-if-dirty|doctor
   greprules cleanup [--config|--cache|--opengrep|--plugin-cache|--repo|--all] [--dry-run]`)
 }
 
@@ -352,7 +356,16 @@ func runRecommend(ctx context.Context, args []string) error {
 	return nil
 }
 
+type fetchCommandOptions struct {
+	quiet  bool
+	stdout io.Writer
+}
+
 func runFetch(ctx context.Context, args []string) error {
+	return runFetchWithOptions(ctx, args, fetchCommandOptions{stdout: os.Stdout})
+}
+
+func runFetchWithOptions(ctx context.Context, args []string, options fetchCommandOptions) error {
 	fs := flag.NewFlagSet("fetch", flag.ContinueOnError)
 	rootFlag := fs.String("root", ".", "repo root or child path")
 	registryURL := fs.String("registry", "", "registry URL override")
@@ -398,7 +411,13 @@ func runFetch(ctx context.Context, args []string) error {
 			return err
 		}
 		lockedPacks = append(lockedPacks, locked)
-		fmt.Println("fetched", packID)
+		if !options.quiet {
+			writer := options.stdout
+			if writer == nil {
+				writer = os.Stdout
+			}
+			fmt.Fprintln(writer, "fetched", packID)
+		}
 	}
 	lock := config.Lock{
 		SchemaVersion: config.LockSchemaVersion,
@@ -502,7 +521,17 @@ func runSetupOpenGrep(ctx context.Context, args []string) error {
 	return nil
 }
 
+type scanCommandOptions struct {
+	quiet  bool
+	stdout io.Writer
+	stderr io.Writer
+}
+
 func runScan(ctx context.Context, args []string) error {
+	return runScanWithOptions(ctx, args, scanCommandOptions{stdout: os.Stdout, stderr: os.Stderr})
+}
+
+func runScanWithOptions(ctx context.Context, args []string, options scanCommandOptions) error {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	rootFlag := fs.String("root", ".", "repo root or child path")
 	changed := fs.Bool("changed", true, "scan changed files")
@@ -592,6 +621,8 @@ func runScan(ctx context.Context, args []string) error {
 		Targets:    targets,
 		OutputPath: jsonPath,
 		Format:     "json",
+		Stdout:     options.stdout,
+		Stderr:     options.stderr,
 	})
 	findings, parseErr := output.FindingsFromOpenGrepJSON(jsonPath)
 	if parseErr != nil {
@@ -624,6 +655,8 @@ func runScan(ctx context.Context, args []string) error {
 			Targets:    targets,
 			OutputPath: sarifPath,
 			Format:     "sarif",
+			Stdout:     options.stdout,
+			Stderr:     options.stderr,
 		}); err != nil {
 			result.Warnings = append(result.Warnings, openGrepRunWarning("SARIF run", err))
 		}
@@ -635,7 +668,13 @@ func runScan(ctx context.Context, args []string) error {
 	if err := output.WriteAgentResult(agentPath, result); err != nil {
 		return err
 	}
-	fmt.Println("wrote", relToRoot(root, agentPath))
+	if !options.quiet {
+		writer := options.stdout
+		if writer == nil {
+			writer = os.Stdout
+		}
+		fmt.Fprintln(writer, "wrote", relToRoot(root, agentPath))
+	}
 	return nil
 }
 
@@ -654,9 +693,21 @@ func runDoctor(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	resolution, err := config.LoadEffectiveConfig(root)
+	report, err := buildDoctorReport(ctx, root, *debug, *engineMode, *opengrepPath, *opengrepVersion)
 	if err != nil {
 		return err
+	}
+	if *format == "json" {
+		return printJSON(report)
+	}
+	printDoctorText(report, *debug)
+	return nil
+}
+
+func buildDoctorReport(ctx context.Context, root string, debug bool, engineMode string, opengrepPath string, opengrepVersion string) (doctorReport, error) {
+	resolution, err := config.LoadEffectiveConfig(root)
+	if err != nil {
+		return doctorReport{}, err
 	}
 	cfg := resolution.Config
 	report := doctorReport{
@@ -677,7 +728,7 @@ func runDoctor(ctx context.Context, args []string) error {
 		report.RecommendedCommands = append(report.RecommendedCommands, "greprules fetch")
 	} else {
 		report.Lock = lockStatus{Exists: true, Path: config.LockPath(root), PackCount: len(lock.Packs)}
-		if *debug {
+		if debug {
 			report.Lock.Value = &lock
 		}
 	}
@@ -691,7 +742,7 @@ func runDoctor(ctx context.Context, args []string) error {
 	} else {
 		report.OpenGrep.System = runtimeCheck{OK: true, Runtime: &runtimeInfo}
 	}
-	if runtimeInfo, err := runtimeFromConfigOrLock(config.Lock{}, cfg, *engineMode, *opengrepPath, *opengrepVersion); err != nil {
+	if runtimeInfo, err := runtimeFromConfigOrLock(config.Lock{}, cfg, engineMode, opengrepPath, opengrepVersion); err != nil {
 		report.OpenGrep.Active = runtimeCheck{OK: false, Error: err.Error()}
 	} else {
 		report.OpenGrep.Active = runtimeCheck{OK: true, Runtime: &runtimeInfo}
@@ -701,11 +752,7 @@ func runDoctor(ctx context.Context, args []string) error {
 	if !report.Registry.OK || !report.Lock.Exists || !report.OpenGrep.Active.OK {
 		report.Status = "needs_attention"
 	}
-	if *format == "json" {
-		return printJSON(report)
-	}
-	printDoctorText(report, *debug)
-	return nil
+	return report, nil
 }
 
 type doctorReport struct {

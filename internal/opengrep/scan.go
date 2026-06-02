@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 )
@@ -14,6 +15,8 @@ type ScanOptions struct {
 	Targets    []string
 	OutputPath string
 	Format     string
+	Stdout     io.Writer
+	Stderr     io.Writer
 }
 
 func RunScan(ctx context.Context, runtimeInfo Runtime, options ScanOptions) error {
@@ -47,8 +50,14 @@ func RunScan(ctx context.Context, runtimeInfo Runtime, options ScanOptions) erro
 	args = append(args, options.Targets...)
 	cmd := exec.CommandContext(ctx, runtimeInfo.Path, args...)
 	cmd.Dir = options.WorkingDir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = options.Stdout
+	if cmd.Stdout == nil {
+		cmd.Stdout = os.Stdout
+	}
+	cmd.Stderr = options.Stderr
+	if cmd.Stderr == nil {
+		cmd.Stderr = os.Stderr
+	}
 	return cmd.Run()
 }
 
