@@ -562,7 +562,7 @@ func TestRunCleanupRemovesSelectedUserPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(cacheRoot, "greprules", "v1.0.0", "greprules"), "binary")
+	writeFile(t, filepath.Join(cacheRoot, "greprules", "v0.1.0", "greprules"), "binary")
 
 	if err := runCleanup([]string{"--config", "--plugin-cache", "--dry-run"}); err != nil {
 		t.Fatal(err)

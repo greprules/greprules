@@ -50,6 +50,11 @@ if message:
                 "additionalContext": message,
             }
         }
+    elif event_name == "StopBlock":
+        payload = {
+            "decision": "block",
+            "reason": message,
+        }
     else:
         payload = {
             "continue": True,
@@ -63,6 +68,9 @@ PY
     case "$event_name" in
       PostToolUse|PostToolBatch|UserPromptSubmit)
         printf '{"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}}\n' "$event_name" "$escaped"
+        ;;
+      StopBlock)
+        printf '{"decision":"block","reason":"%s"}\n' "$escaped"
         ;;
       *)
         printf '{"continue":true,"systemMessage":"%s"}\n' "$escaped"
@@ -140,7 +148,11 @@ if errors:
 if not findings:
     lines.append("No OpenGrep findings were reported for the current automatic scan.")
 else:
-    lines.append(f"OpenGrep findings: {len(findings)}. Review likely true positives before editing further.")
+    lines.append(
+        f"OpenGrep reported {len(findings)} finding(s) on files you just edited. "
+        "Review .greprules/out/agent-result.json: classify each as true/false positive, "
+        "explain reasoning, and fix or justify before finishing."
+    )
     for finding in findings[:10]:
         start = finding.get("start") or {}
         path_value = finding.get("path") or "<unknown>"
@@ -356,6 +368,14 @@ doctor_context() {
 }
 
 scan_if_dirty() {
+  local hook_input stop_active
+  hook_input="$(cat 2>/dev/null || true)"
+  stop_active="$(printf '%s' "$hook_input" | json_field "stop_hook_active" 2>/dev/null || true)"
+  if [[ "$stop_active" == "true" ]]; then
+    log_msg "stop_hook_active=true; skipping automatic scan block"
+    exit 0
+  fi
+
   if ! auto_scan_enabled; then
     log_msg "auto scan disabled"
     exit 0
@@ -446,7 +466,7 @@ scan_if_dirty() {
   printf '%s\n' "$summary" > "$LAST_SUMMARY_PATH" 2>/dev/null || true
   date +%s > "$LAST_SCAN_PATH" 2>/dev/null || true
   rm -f "$DIRTY_MARKER" "$DIRTY_FILES_PATH" "$SCAN_TARGETS_PATH" 2>/dev/null || true
-  emit_context "Stop" "$summary"
+  emit_context "StopBlock" "$summary"
 }
 
 case "$MODE" in
