@@ -21,7 +21,7 @@ Skills:
 
 Automatic hooks:
 
-- `SessionStart` runs `greprules doctor --format json` and reports setup gaps. If system OpenGrep is available but the active runtime is not ready, it tells Claude to ask whether to use system OpenGrep or install managed OpenGrep. It does not scan.
+- `SessionStart` runs `greprules doctor --format json` and reports setup gaps. If `opengrep_mode=managed` is configured and managed OpenGrep is missing, it installs managed OpenGrep automatically. If system OpenGrep is available but the active runtime is not ready, it tells Claude to ask whether to use system OpenGrep or install managed OpenGrep. It does not scan.
 - `PostToolUse` runs after Claude Code edits files with `Edit`, `MultiEdit`, `Write`, or `NotebookEdit` and only marks the workspace dirty. It does not scan.
 - `Stop` fetches rule packs if needed, verifies OpenGrep readiness, runs one `greprules scan --changed`, and injects a compact scan summary into Claude's next model context.
 - Set `GREPRULES_AUTO_SCAN=false` before starting Claude Code to disable this hook for a session.

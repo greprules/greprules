@@ -13,6 +13,7 @@ Rules:
 - After changing config, run `greprules config inspect --format json` and summarize the effective config.
 - Claude Code plugin options are available as `opengrep_mode` and `opengrep_path`. If `opengrep_mode` is unset, the plugin does not override CLI config and uses first-session setup guidance.
 - Expose `opengrep_mode` as `managed`, `system`, or advanced `path`; do not present `auto` as a user choice.
+- If `opengrep_mode` is `managed`, the Claude Code hook automatically runs `greprules setup-opengrep` when managed OpenGrep is missing.
 - If the user wants the same behavior in terminals or CI, write the setting with `greprules config set --global` instead of relying only on plugin options.
 
 Common commands:
@@ -34,7 +35,7 @@ Runtime selection workflow:
 1. Run `greprules doctor --format json`.
 2. If `opengrep.system.ok` is true and `opengrep.active.ok` is false, ask the user whether to use the detected system OpenGrep or install managed OpenGrep.
 3. If the user chooses system OpenGrep, run `greprules config set opengrep.mode system --global`.
-4. If the user chooses managed OpenGrep, run `greprules setup-opengrep`, then `greprules config set opengrep.mode managed --global`.
+4. If the user chooses managed OpenGrep through plugin config, no manual install command is needed in Claude Code; the hook will run `greprules setup-opengrep` when needed. For terminal or CI parity, run `greprules setup-opengrep`, then `greprules config set opengrep.mode managed --global`.
 5. Run `greprules doctor --format json` again and summarize readiness.
 
 If the user asks for a recommended default and no system OpenGrep is already available, prefer managed OpenGrep for reproducible community scans. If system OpenGrep is already available, ask before switching because system is faster to adopt but less reproducible across machines.

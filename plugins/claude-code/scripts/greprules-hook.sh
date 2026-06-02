@@ -136,6 +136,32 @@ auto_scan_enabled() {
   return 0
 }
 
+plugin_opengrep_mode() {
+  local mode="${CLAUDE_PLUGIN_OPTION_OPENGREP_MODE:-${CLAUDE_PLUGIN_OPTION_opengrep_mode:-}}"
+  printf '%s' "$mode" | tr '[:upper:]' '[:lower:]'
+}
+
+setup_managed_opengrep_if_requested() {
+  local event_name="$1"
+  local active_ok="$2"
+  local plugin_mode
+  plugin_mode="$(plugin_opengrep_mode)"
+
+  if [[ "$plugin_mode" != "managed" || "$active_ok" == "true" ]]; then
+    return 1
+  fi
+
+  local setup_output
+  log_msg "managed OpenGrep setup requested by plugin option"
+  if ! setup_output="$("$GREPRULES" setup-opengrep 2>&1)"; then
+    log_msg "managed OpenGrep setup failed: $setup_output"
+    emit_context "$event_name" "greprules managed OpenGrep auto-install failed: ${setup_output}"
+    exit 0
+  fi
+  log_msg "managed OpenGrep setup completed: $setup_output"
+  return 0
+}
+
 ensure_git_repo() {
   cd "$PROJECT_DIR" 2>/dev/null || return 1
   git rev-parse --show-toplevel >/dev/null 2>&1
@@ -184,7 +210,7 @@ doctor_context() {
     exit 0
   fi
 
-  local registry_ok lock_exists active_ok recommended system_ok system_path system_version plugin_mode setup_guidance
+  local registry_ok lock_exists active_ok recommended system_ok system_path system_version plugin_mode setup_guidance managed_setup_note
   registry_ok="$(printf '%s' "$doctor_output" | json_field "registry.ok" 2>/dev/null || true)"
   lock_exists="$(printf '%s' "$doctor_output" | json_field "lock.exists" 2>/dev/null || true)"
   active_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.active.ok" 2>/dev/null || true)"
@@ -192,7 +218,23 @@ doctor_context() {
   system_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.system.ok" 2>/dev/null || true)"
   system_path="$(printf '%s' "$doctor_output" | json_field "opengrep.system.runtime.path" 2>/dev/null || true)"
   system_version="$(printf '%s' "$doctor_output" | json_field "opengrep.system.runtime.version" 2>/dev/null || true)"
-  plugin_mode="${CLAUDE_PLUGIN_OPTION_OPENGREP_MODE:-${CLAUDE_PLUGIN_OPTION_opengrep_mode:-}}"
+  plugin_mode="$(plugin_opengrep_mode)"
+  managed_setup_note=""
+
+  if setup_managed_opengrep_if_requested "SessionStart" "$active_ok"; then
+    managed_setup_note=" Managed OpenGrep was installed automatically because setup method is managed."
+    if ! doctor_output="$("$GREPRULES" doctor --format json 2>&1)"; then
+      emit_context "SessionStart" "greprules installed managed OpenGrep, but readiness check failed: ${doctor_output}"
+      exit 0
+    fi
+    registry_ok="$(printf '%s' "$doctor_output" | json_field "registry.ok" 2>/dev/null || true)"
+    lock_exists="$(printf '%s' "$doctor_output" | json_field "lock.exists" 2>/dev/null || true)"
+    active_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.active.ok" 2>/dev/null || true)"
+    recommended="$(printf '%s' "$doctor_output" | json_field "recommendedCommands" 2>/dev/null || true)"
+    system_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.system.ok" 2>/dev/null || true)"
+    system_path="$(printf '%s' "$doctor_output" | json_field "opengrep.system.runtime.path" 2>/dev/null || true)"
+    system_version="$(printf '%s' "$doctor_output" | json_field "opengrep.system.runtime.version" 2>/dev/null || true)"
+  fi
 
   if [[ "$registry_ok" == "true" && "$lock_exists" == "true" && "$active_ok" == "true" ]]; then
     log_msg "doctor ok"
@@ -208,7 +250,7 @@ doctor_context() {
     setup_guidance="${setup_guidance}. Ask the user whether to use system OpenGrep or install managed OpenGrep. If they choose system, run greprules config set opengrep.mode system --global. If they choose managed, run greprules setup-opengrep. Current plugin opengrep_mode option: ${plugin_mode:-unset}."
   fi
 
-  emit_context "SessionStart" "greprules needs setup before automatic scans. Registry ready: ${registry_ok:-unknown}; lockfile exists: ${lock_exists:-unknown}; OpenGrep ready: ${active_ok:-unknown}. Recommended commands: ${recommended:-greprules doctor --format json}.${setup_guidance}"
+  emit_context "SessionStart" "greprules needs setup before automatic scans. Registry ready: ${registry_ok:-unknown}; lockfile exists: ${lock_exists:-unknown}; OpenGrep ready: ${active_ok:-unknown}. Recommended commands: ${recommended:-greprules doctor --format json}.${managed_setup_note}${setup_guidance}"
 }
 
 scan_if_dirty() {
@@ -267,6 +309,17 @@ scan_if_dirty() {
   lock_exists="$(printf '%s' "$doctor_output" | json_field "lock.exists" 2>/dev/null || true)"
   active_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.active.ok" 2>/dev/null || true)"
   recommended="$(printf '%s' "$doctor_output" | json_field "recommendedCommands" 2>/dev/null || true)"
+
+  if setup_managed_opengrep_if_requested "Stop" "$active_ok"; then
+    if ! doctor_output="$("$GREPRULES" doctor --format json 2>&1)"; then
+      emit_context "Stop" "greprules installed managed OpenGrep, but readiness check failed: ${doctor_output}"
+      exit 0
+    fi
+    registry_ok="$(printf '%s' "$doctor_output" | json_field "registry.ok" 2>/dev/null || true)"
+    lock_exists="$(printf '%s' "$doctor_output" | json_field "lock.exists" 2>/dev/null || true)"
+    active_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.active.ok" 2>/dev/null || true)"
+    recommended="$(printf '%s' "$doctor_output" | json_field "recommendedCommands" 2>/dev/null || true)"
+  fi
 
   if [[ "$lock_exists" != "true" && "$registry_ok" == "true" ]]; then
     local fetch_output

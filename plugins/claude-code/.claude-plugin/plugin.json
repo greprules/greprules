@@ -18,14 +18,14 @@
   "userConfig": {
     "opengrep_mode": {
       "type": "string",
-      "title": "OpenGrep runtime mode",
-      "description": "OpenGrep runtime for greprules in Claude Code. Choose managed, system, or path. Leave unset to use greprules CLI config and first-session setup guidance.",
+      "title": "OpenGrep setup method",
+      "description": "Choose managed for automatic OpenGrep setup, system to use an existing opengrep on PATH, or path for a specific executable. Recommended: managed.",
       "required": false
     },
     "opengrep_path": {
       "type": "file",
       "title": "OpenGrep executable path",
-      "description": "Optional absolute path to an OpenGrep executable. Used when opengrep_mode is path, or as a path override.",
+      "description": "Required only when setup method is path. Enter the absolute path to your opengrep executable.",
       "required": false
     }
   }

@@ -152,7 +152,7 @@ Then reload Claude Code and use:
 
 The plugin includes a `bin/greprules` wrapper and lifecycle hooks tuned for agent editing:
 
-- `SessionStart`: run `doctor` only and report setup gaps. It never scans.
+- `SessionStart`: run `doctor` and report setup gaps. If `opengrep_mode=managed` is configured and managed OpenGrep is missing, it installs managed OpenGrep automatically. It never scans.
 - `PostToolUse` for `Edit`, `MultiEdit`, `Write`, and `NotebookEdit`: mark the workspace dirty. It never scans.
 - `Stop`: if the workspace is dirty, run one changed-file scan and inject a compact summary into Claude's next model context.
 
@@ -164,7 +164,7 @@ system PATH, excluding the plugin wrapper itself
 GitHub Release bootstrap into $CLAUDE_PLUGIN_DATA/greprules/v0.1.0/greprules
 ```
 
-If `opengrep_mode` is unset, the plugin does not override CLI config. On session start, `greprules doctor --format json` reports setup gaps; when system OpenGrep is detected but the active runtime is not ready, Claude is instructed to ask whether to use system OpenGrep or install managed OpenGrep.
+If `opengrep_mode` is unset, the plugin does not override CLI config. On session start, `greprules doctor --format json` reports setup gaps; when system OpenGrep is detected but the active runtime is not ready, Claude is instructed to ask whether to use system OpenGrep or install managed OpenGrep. If `opengrep_mode=managed` is configured, the plugin runs `greprules setup-opengrep` automatically when managed OpenGrep is missing.
 
 For local development before a release exists, build and copy the CLI onto `PATH`:
 
