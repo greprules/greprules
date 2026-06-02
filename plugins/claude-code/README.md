@@ -4,11 +4,7 @@ This plugin teaches Claude Code how to use the local `greprules` CLI without emb
 
 The plugin provides a `bin/greprules` wrapper. The wrapper resolves the real CLI from `GREPRULES_CLI_PATH`, system `PATH`, or a managed GitHub Release download cached under `$CLAUDE_PLUGIN_DATA/greprules/v0.1.0/`.
 
-Claude Code stores plugin configuration in its settings file and passes the values to hooks and wrappers as environment variables. The wrapper maps those plugin options to greprules runtime selection:
-
-- `opengrep_path` set: use that executable with `GREPRULES_ENGINE=path`
-- `install_opengrep=true`: use managed OpenGrep with `GREPRULES_ENGINE=managed`
-- `install_opengrep=false`: use system OpenGrep with `GREPRULES_ENGINE=system`
+The plugin does not use install-time plugin configuration. OpenGrep runtime selection is stored in the greprules CLI config, so Claude Code, terminals, and CI can share the same behavior.
 
 It uses structured CLI outputs:
 
@@ -19,13 +15,13 @@ It uses structured CLI outputs:
 Skills:
 
 - `/greprules:doctor`: inspect readiness and recommend next commands
-- `/greprules:configure`: set global/local greprules config through the CLI
-- `/greprules:scan`: fetch packs if needed, scan changed files, and summarize findings
+- `/greprules:configure`: choose managed, system, or manual-path OpenGrep through the CLI
+- `/greprules:scan`: fetch packs if needed, scan changed files or explicit targets, and summarize findings
 
 Automatic hooks:
 
-- `SessionStart` runs `greprules doctor --format json` and reports setup gaps. If `install_opengrep=true` and managed OpenGrep is missing, it installs managed OpenGrep automatically. If `install_opengrep=false` and no system OpenGrep is found, it tells Claude to ask the user to enable automatic install or set `opengrep_path`. It does not scan.
-- `PostToolUse` runs after Claude Code edits files with `Edit`, `MultiEdit`, `Write`, or `NotebookEdit` and only marks the workspace dirty. It does not scan.
-- `Stop` fetches rule packs if needed, verifies OpenGrep readiness, runs one `greprules scan --changed`, and injects a compact scan summary into Claude's next model context.
+- `SessionStart` runs `greprules doctor --format json` and reports setup gaps. It does not install OpenGrep or scan.
+- `PostToolUse` runs after Claude Code edits files with `Edit`, `MultiEdit`, `Write`, or `NotebookEdit`, captures the edited file path from the hook input, and marks the workspace dirty. It does not scan.
+- `Stop` fetches rule packs if needed, verifies OpenGrep readiness, runs one targeted scan over files Claude actually edited, and injects a compact scan summary into Claude's next model context. It works in non-git directories.
 - Set `GREPRULES_AUTO_SCAN=false` before starting Claude Code to disable this hook for a session.
 - Tune automatic scans with `GREPRULES_AUTO_SCAN_MIN_INTERVAL_SECONDS` and `GREPRULES_AUTO_SCAN_MAX_CHANGED_FILES`.

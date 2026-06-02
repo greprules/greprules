@@ -130,6 +130,105 @@ fi
 	}
 }
 
+func TestRunScanUsesExplicitTargetsFromFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake runtime is unix-only")
+	}
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "a.go"), "package main\n")
+	writeFile(t, filepath.Join(root, "b.go"), "package main\n")
+	writeFile(t, filepath.Join(root, ".greprules", "cache", "packs", "go-security", "rules", "example.yaml"), "rules: []\n")
+	targetsFrom := filepath.Join(root, "targets.txt")
+	writeFile(t, targetsFrom, "b.go\na.go\nb.go\n\n")
+	targetLog := filepath.Join(root, "opengrep-targets.txt")
+	fakeOpenGrep := filepath.Join(root, "fake-opengrep")
+	writeFile(t, fakeOpenGrep, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'opengrep 9.8.7\n'
+  exit 0
+fi
+out=""
+fmt="json"
+targets=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    scan) ;;
+    --config) shift ;;
+    --output) shift; out="$1" ;;
+    --json) fmt="json" ;;
+    --sarif) fmt="sarif" ;;
+    --*) ;;
+    *) targets="${targets}${targets:+ }$1" ;;
+  esac
+  shift
+done
+printf '%s\n' "$targets" >> "`+targetLog+`"
+if [ "$fmt" = "sarif" ]; then
+  printf '{"version":"2.1.0","runs":[]}\n' > "$out"
+else
+  printf '{"results":[]}\n' > "$out"
+fi
+`)
+	if err := os.Chmod(fakeOpenGrep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.OpenGrep.Mode = "path"
+	cfg.OpenGrep.Managed = false
+	cfg.OpenGrep.Path = fakeOpenGrep
+	if err := config.SaveLocalConfig(root, cfg); err != nil {
+		t.Fatal(err)
+	}
+	lock := config.Lock{
+		SchemaVersion: config.LockSchemaVersion,
+		Registry:      "https://example.test",
+		Packs: []config.LockedPack{{
+			ID:         "go-security",
+			Version:    "build-1",
+			SHA256:     "abc",
+			RulePath:   ".greprules/cache/packs/go-security/rules",
+			TotalRules: 1,
+		}},
+	}
+	if err := config.SaveLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runScan(t.Context(), []string{"--root", root, "--targets-from", targetsFrom}); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(root, ".greprules", "out", "agent-result.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Repo struct {
+			ChangedMode  bool     `json:"changedMode"`
+			ChangedFiles []string `json:"changedFiles"`
+		} `json:"repo"`
+		Scan struct {
+			Targets []string `json:"targets"`
+		} `json:"scan"`
+	}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Repo.ChangedMode || len(result.Repo.ChangedFiles) != 0 {
+		t.Fatalf("expected explicit targets not git changed mode, got %s", string(data))
+	}
+	if strings.Join(result.Scan.Targets, ",") != "a.go,b.go" {
+		t.Fatalf("unexpected scan targets: %s", string(data))
+	}
+	logData, err := os.ReadFile(targetLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(logData), "a.go b.go") {
+		t.Fatalf("expected explicit targets in opengrep invocation, got %q", string(logData))
+	}
+}
+
 func TestRunInitWritesSystemEngineConfig(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.test\n")

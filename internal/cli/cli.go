@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -89,7 +91,7 @@ Usage:
   greprules recommend
   greprules fetch [--pack PACK]
   greprules setup-opengrep [--version latest]
-  greprules scan [--changed|--full] [--engine managed|system|path]
+  greprules scan [--changed|--full|--target PATH|--targets-from FILE] [--engine managed|system|path]
   greprules doctor [--debug] [--engine managed|system|path]`)
 }
 
@@ -499,6 +501,9 @@ func runScan(ctx context.Context, args []string) error {
 	engineMode := fs.String("engine", "", "OpenGrep engine mode override: managed, system, or path")
 	opengrepPath := fs.String("opengrep-path", "", "OpenGrep binary path override")
 	opengrepVersion := fs.String("opengrep-version", "", "managed OpenGrep version override")
+	targetsFrom := fs.String("targets-from", "", "newline-delimited file of scan targets relative to root")
+	var targetFlags stringList
+	fs.Var(&targetFlags, "target", "explicit scan target path, repeatable or comma-separated")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -526,15 +531,31 @@ func runScan(ctx context.Context, args []string) error {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return err
 	}
+	explicitTargets, explicitTargetMode, err := scanTargetsFromFlags(root, targetFlags, *targetsFrom)
+	if err != nil {
+		return err
+	}
+	if explicitTargetMode && *full {
+		return errors.New("--full cannot be combined with --target or --targets-from")
+	}
 	targets := []string{"."}
-	changedMode := *changed && !*full
+	changedMode := *changed && !*full && !explicitTargetMode
 	var changedFiles []string
-	if changedMode {
+	var emptyTargetsWarning string
+	if explicitTargetMode {
+		targets = explicitTargets
+		if len(targets) == 0 {
+			emptyTargetsWarning = "no explicit targets to scan"
+		}
+	} else if changedMode {
 		changedFiles, err = gitutil.ChangedFiles(root)
 		if err != nil {
 			return err
 		}
 		targets = changedFiles
+		if len(targets) == 0 {
+			emptyTargetsWarning = "no changed files to scan"
+		}
 	}
 	jsonPath := filepath.Join(outputDir, "scan.json")
 	sarifPath := filepath.Join(outputDir, "scan.sarif")
@@ -542,9 +563,9 @@ func runScan(ctx context.Context, args []string) error {
 	startedAt := time.Now().UTC().Format(time.RFC3339)
 	result := baseAgentResult(root, lock, runtimeInfo, changedMode, changedFiles, targets, jsonPath, sarifPath)
 	result.Scan.StartedAt = startedAt
-	if changedMode && len(targets) == 0 {
+	if emptyTargetsWarning != "" {
 		result.Status = "ok"
-		result.Warnings = append(result.Warnings, "no changed files to scan")
+		result.Warnings = append(result.Warnings, emptyTargetsWarning)
 		result.Scan.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 		return output.WriteAgentResult(agentPath, result)
 	}
@@ -869,6 +890,91 @@ func combinedRulePath(root string, lock config.Lock) string {
 		paths = append(paths, absFromRoot(root, pack.RulePath))
 	}
 	return strings.Join(paths, string(os.PathListSeparator))
+}
+
+func scanTargetsFromFlags(root string, targets stringList, targetsFrom string) ([]string, bool, error) {
+	rawTargets := append([]string{}, targets...)
+	explicitMode := len(rawTargets) > 0 || targetsFrom != ""
+	if targetsFrom != "" {
+		fileTargets, err := readTargetsFile(targetsFrom)
+		if err != nil {
+			return nil, true, err
+		}
+		rawTargets = append(rawTargets, fileTargets...)
+	}
+	if !explicitMode {
+		return nil, false, nil
+	}
+	normalized, err := normalizeScanTargets(root, rawTargets)
+	if err != nil {
+		return nil, true, err
+	}
+	return normalized, true, nil
+}
+
+func readTargetsFile(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("read targets file: %w", err)
+	}
+	defer file.Close()
+
+	var targets []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		targets = append(targets, line)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("read targets file: %w", err)
+	}
+	return targets, nil
+}
+
+func normalizeScanTargets(root string, rawTargets []string) ([]string, error) {
+	seen := map[string]bool{}
+	var normalized []string
+	for _, raw := range rawTargets {
+		target, err := normalizeScanTarget(root, raw)
+		if err != nil {
+			return nil, err
+		}
+		if target == "" || seen[target] {
+			continue
+		}
+		seen[target] = true
+		normalized = append(normalized, target)
+	}
+	sort.Strings(normalized)
+	return normalized, nil
+}
+
+func normalizeScanTarget(root string, raw string) (string, error) {
+	target := strings.TrimSpace(raw)
+	if target == "" {
+		return "", nil
+	}
+	if filepath.IsAbs(target) {
+		rel, err := filepath.Rel(root, target)
+		if err != nil {
+			return "", err
+		}
+		target = rel
+	}
+	target = filepath.Clean(target)
+	if target == "." {
+		return ".", nil
+	}
+	if target == ".." || strings.HasPrefix(target, ".."+string(os.PathSeparator)) || filepath.IsAbs(target) {
+		return "", fmt.Errorf("scan target is outside root: %s", raw)
+	}
+	if _, err := os.Stat(filepath.Join(root, target)); err != nil {
+		return "", fmt.Errorf("scan target is not available: %s: %w", target, err)
+	}
+	return target, nil
 }
 
 func baseAgentResult(root string, lock config.Lock, runtimeInfo opengrep.Runtime, changedMode bool, changedFiles []string, targets []string, jsonPath string, sarifPath string) output.AgentResult {

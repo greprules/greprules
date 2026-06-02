@@ -6,47 +6,6 @@ GREPRULES_REPO="${GREPRULES_REPO:-greprules/greprules}"
 SELF_PATH="${BASH_SOURCE[0]}"
 SELF_DIR="$(CDPATH= cd -- "$(dirname -- "$SELF_PATH")" && pwd)"
 
-apply_plugin_options() {
-  local install_opengrep="${CLAUDE_PLUGIN_OPTION_INSTALL_OPENGREP:-${CLAUDE_PLUGIN_OPTION_install_opengrep:-}}"
-  local legacy_mode="${CLAUDE_PLUGIN_OPTION_OPENGREP_MODE:-${CLAUDE_PLUGIN_OPTION_opengrep_mode:-}}"
-  local opengrep_path="${CLAUDE_PLUGIN_OPTION_OPENGREP_PATH:-${CLAUDE_PLUGIN_OPTION_opengrep_path:-}}"
-
-  if [[ -n "$opengrep_path" ]]; then
-    export GREPRULES_ENGINE="path"
-    export GREPRULES_OPENGREP_PATH="$opengrep_path"
-    return
-  fi
-
-  if [[ -n "$install_opengrep" ]]; then
-    case "$(printf '%s' "$install_opengrep" | tr '[:upper:]' '[:lower:]')" in
-      0|false|no|off)
-        export GREPRULES_ENGINE="system"
-        ;;
-      *)
-        export GREPRULES_ENGINE="managed"
-        ;;
-    esac
-    return
-  fi
-
-  legacy_mode="$(printf '%s' "$legacy_mode" | tr '[:upper:]' '[:lower:]')"
-  case "$legacy_mode" in
-    managed|system|path)
-      export GREPRULES_ENGINE="$legacy_mode"
-      ;;
-    "")
-      if [[ -n "${CLAUDE_PLUGIN_ROOT:-}${CLAUDE_PLUGIN_DATA:-}" ]]; then
-        export GREPRULES_ENGINE="managed"
-      fi
-      ;;
-    *)
-      printf 'warning: ignoring unsupported greprules opengrep_mode plugin option: %s\n' "$legacy_mode" >&2
-      ;;
-  esac
-}
-
-apply_plugin_options
-
 if [[ -n "${GREPRULES_CLI_PATH:-}" && -f "${GREPRULES_CLI_PATH}" && -x "${GREPRULES_CLI_PATH}" ]]; then
   exec "${GREPRULES_CLI_PATH}" "$@"
 fi

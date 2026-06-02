@@ -8,6 +8,8 @@ PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
 STATE_DIR="${CLAUDE_PLUGIN_DATA:-${PROJECT_DIR}/.greprules/plugin-data}"
 LOG_PATH="${STATE_DIR}/hook.log"
 DIRTY_MARKER="${STATE_DIR}/dirty"
+DIRTY_FILES_PATH="${STATE_DIR}/dirty-files"
+SCAN_TARGETS_PATH="${STATE_DIR}/scan-targets.txt"
 LAST_SCAN_PATH="${STATE_DIR}/last-scan"
 LAST_SUMMARY_PATH="${STATE_DIR}/last-summary.txt"
 MIN_INTERVAL_SECONDS="${GREPRULES_AUTO_SCAN_MIN_INTERVAL_SECONDS:-45}"
@@ -101,14 +103,19 @@ findings = data.get("findings") or []
 warnings = data.get("warnings") or []
 errors = data.get("errors") or []
 
-lines = [f"greprules automatic changed-file scan completed with status: {status}."]
+repo = data.get("repo") or {}
+scan = data.get("scan") or {}
+targets = scan.get("targets") or []
+scan_label = "changed-file" if repo.get("changedMode") else "edited-file"
+
+lines = [f"greprules automatic {scan_label} scan completed with status: {status}."]
 if warnings:
     lines.append("Warnings: " + "; ".join(str(item) for item in warnings[:3]))
 if errors:
     lines.append("Errors: " + "; ".join(str(item) for item in errors[:3]))
 
 if not findings:
-    lines.append("No OpenGrep findings were reported for the current changed-file scan.")
+    lines.append("No OpenGrep findings were reported for the current automatic scan.")
 else:
     lines.append(f"OpenGrep findings: {len(findings)}. Review likely true positives before editing further.")
     for finding in findings[:10]:
@@ -121,6 +128,11 @@ else:
         lines.append(f"- {severity} {rule_id} {path_value}:{line} {message}")
     if len(findings) > 10:
         lines.append(f"- {len(findings) - 10} additional finding(s) omitted from hook context.")
+
+if targets:
+    lines.append("Scanned targets: " + ", ".join(str(item) for item in targets[:10]))
+    if len(targets) > 10:
+        lines.append(f"- {len(targets) - 10} additional target(s) omitted from hook context.")
 
 lines.append("Full result: .greprules/out/agent-result.json")
 print("\n".join(lines))
@@ -136,71 +148,111 @@ auto_scan_enabled() {
   return 0
 }
 
-plugin_opengrep_mode() {
-  local opengrep_path="${CLAUDE_PLUGIN_OPTION_OPENGREP_PATH:-${CLAUDE_PLUGIN_OPTION_opengrep_path:-}}"
-  local install_opengrep="${CLAUDE_PLUGIN_OPTION_INSTALL_OPENGREP:-${CLAUDE_PLUGIN_OPTION_install_opengrep:-}}"
-  local legacy_mode="${CLAUDE_PLUGIN_OPTION_OPENGREP_MODE:-${CLAUDE_PLUGIN_OPTION_opengrep_mode:-}}"
-
-  if [[ -n "$opengrep_path" ]]; then
-    printf 'path'
-    return
-  fi
-
-  if [[ -n "$install_opengrep" ]]; then
-    case "$(printf '%s' "$install_opengrep" | tr '[:upper:]' '[:lower:]')" in
-      0|false|no|off)
-        printf 'system'
-        ;;
-      *)
-        printf 'managed'
-        ;;
-    esac
-    return
-  fi
-
-  legacy_mode="$(printf '%s' "$legacy_mode" | tr '[:upper:]' '[:lower:]')"
-  case "$legacy_mode" in
-    managed|system|path)
-      printf '%s' "$legacy_mode"
-      ;;
-    *)
-      printf 'managed'
-      ;;
-  esac
+ensure_project_dir() {
+  cd "$PROJECT_DIR" 2>/dev/null || return 1
 }
 
-plugin_opengrep_path() {
-  printf '%s' "${CLAUDE_PLUGIN_OPTION_OPENGREP_PATH:-${CLAUDE_PLUGIN_OPTION_opengrep_path:-}}"
-}
-
-setup_managed_opengrep_if_requested() {
-  local event_name="$1"
-  local active_ok="$2"
-  local plugin_mode
-  plugin_mode="$(plugin_opengrep_mode)"
-
-  if [[ "$plugin_mode" != "managed" || "$active_ok" == "true" ]]; then
+capture_edited_files() {
+  if ! command -v python3 >/dev/null 2>&1; then
     return 1
   fi
+  local hook_input
+  hook_input="$(cat)"
+  PROJECT_DIR_FOR_HOOK="$PROJECT_DIR" HOOK_INPUT_JSON="$hook_input" python3 - <<'PY'
+import json
+import os
+import sys
 
-  local setup_output
-  log_msg "managed OpenGrep setup requested by plugin configuration"
-  if ! setup_output="$("$GREPRULES" setup-opengrep 2>&1)"; then
-    log_msg "managed OpenGrep setup failed: $setup_output"
-    emit_context "$event_name" "greprules managed OpenGrep auto-install failed: ${setup_output}"
-    exit 0
+raw = os.environ.get("HOOK_INPUT_JSON", "")
+if not raw.strip():
+    sys.exit(0)
+
+try:
+    payload = json.loads(raw)
+except Exception:
+    sys.exit(0)
+
+tool_input = payload.get("tool_input") or payload.get("toolInput") or {}
+tool_response = payload.get("tool_response") or payload.get("toolResponse") or {}
+project_dir = os.environ.get("PROJECT_DIR_FOR_HOOK") or os.getcwd()
+root = os.path.realpath(project_dir)
+path_keys = {"file_path", "filePath", "notebook_path", "notebookPath"}
+tool_name = str(payload.get("tool_name") or payload.get("toolName") or "")
+if tool_name in {"Edit", "MultiEdit", "Write", "NotebookEdit"}:
+    path_keys.add("path")
+
+seen = set()
+
+def add_path(value):
+    if not isinstance(value, str) or not value.strip():
+        return
+    candidate = value.strip()
+    if os.path.isabs(candidate):
+        absolute = os.path.realpath(candidate)
+    else:
+        absolute = os.path.realpath(os.path.join(root, candidate))
+    try:
+        rel = os.path.relpath(absolute, root)
+    except ValueError:
+        return
+    if rel == ".." or rel.startswith(".." + os.sep) or os.path.isabs(rel):
+        return
+    if not os.path.exists(absolute):
+        return
+    if rel not in seen:
+        seen.add(rel)
+
+def walk(value):
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in path_keys:
+                add_path(item)
+            else:
+                walk(item)
+    elif isinstance(value, list):
+        for item in value:
+            walk(item)
+
+walk(tool_input)
+walk(tool_response)
+for rel in sorted(seen):
+    print(rel)
+PY
+}
+
+dedupe_dirty_files() {
+  if [[ ! -f "$DIRTY_FILES_PATH" ]]; then
+    return 0
   fi
-  log_msg "managed OpenGrep setup completed: $setup_output"
-  return 0
+  local tmp
+  tmp="${DIRTY_FILES_PATH}.tmp"
+  sort -u "$DIRTY_FILES_PATH" > "$tmp" 2>/dev/null && mv "$tmp" "$DIRTY_FILES_PATH" 2>/dev/null || rm -f "$tmp" 2>/dev/null || true
 }
 
-ensure_git_repo() {
-  cd "$PROJECT_DIR" 2>/dev/null || return 1
-  git rev-parse --show-toplevel >/dev/null 2>&1
+prepare_scan_targets() {
+  : > "$SCAN_TARGETS_PATH" 2>/dev/null || return 1
+  if [[ ! -f "$DIRTY_FILES_PATH" ]]; then
+    return 0
+  fi
+  while IFS= read -r target; do
+    [[ -z "$target" ]] && continue
+    case "$target" in
+      /*|..|../*|*/../*)
+        continue
+        ;;
+    esac
+    if [[ -e "${PROJECT_DIR}/${target}" ]]; then
+      printf '%s\n' "$target"
+    fi
+  done < "$DIRTY_FILES_PATH" | sort -u > "$SCAN_TARGETS_PATH" 2>/dev/null || true
 }
 
-changed_file_count() {
-  git status --short --untracked-files=all 2>/dev/null | wc -l | tr -d ' '
+scan_target_count() {
+  if [[ ! -f "$SCAN_TARGETS_PATH" ]]; then
+    printf '0'
+    return
+  fi
+  awk 'NF {count++} END {print count + 0}' "$SCAN_TARGETS_PATH" 2>/dev/null || printf '0'
 }
 
 mark_dirty() {
@@ -208,15 +260,21 @@ mark_dirty() {
     log_msg "auto scan disabled; dirty marker skipped"
     exit 0
   fi
-  if ! ensure_git_repo; then
-    log_msg "dirty marker skipped outside git repo: $PROJECT_DIR"
+  if ! ensure_project_dir; then
+    log_msg "dirty marker skipped because project dir is not available: $PROJECT_DIR"
     exit 0
+  fi
+  local edited_files
+  edited_files="$(capture_edited_files 2>/dev/null || true)"
+  if [[ -n "$edited_files" ]]; then
+    printf '%s\n' "$edited_files" >> "$DIRTY_FILES_PATH" 2>/dev/null || true
+    dedupe_dirty_files
   fi
   {
     printf 'project=%s\n' "$PROJECT_DIR"
     printf 'markedAt=%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   } > "$DIRTY_MARKER" 2>/dev/null || true
-  log_msg "marked dirty: $PROJECT_DIR"
+  log_msg "marked dirty: $PROJECT_DIR files=$(printf '%s' "$edited_files" | tr '\n' ',' | sed 's/,$//')"
 }
 
 doctor_context() {
@@ -230,8 +288,8 @@ doctor_context() {
     exit 0
   fi
 
-  if ! ensure_git_repo; then
-    log_msg "doctor skipped outside git repo: $PROJECT_DIR"
+  if ! ensure_project_dir; then
+    log_msg "doctor skipped because project dir is not available: $PROJECT_DIR"
     exit 0
   fi
 
@@ -242,7 +300,7 @@ doctor_context() {
     exit 0
   fi
 
-  local registry_ok lock_exists active_ok recommended system_ok system_path system_version plugin_mode configured_path setup_guidance managed_setup_note
+  local registry_ok lock_exists active_ok recommended system_ok system_path system_version active_mode setup_guidance
   registry_ok="$(printf '%s' "$doctor_output" | json_field "registry.ok" 2>/dev/null || true)"
   lock_exists="$(printf '%s' "$doctor_output" | json_field "lock.exists" 2>/dev/null || true)"
   active_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.active.ok" 2>/dev/null || true)"
@@ -250,24 +308,7 @@ doctor_context() {
   system_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.system.ok" 2>/dev/null || true)"
   system_path="$(printf '%s' "$doctor_output" | json_field "opengrep.system.runtime.path" 2>/dev/null || true)"
   system_version="$(printf '%s' "$doctor_output" | json_field "opengrep.system.runtime.version" 2>/dev/null || true)"
-  plugin_mode="$(plugin_opengrep_mode)"
-  configured_path="$(plugin_opengrep_path)"
-  managed_setup_note=""
-
-  if setup_managed_opengrep_if_requested "SessionStart" "$active_ok"; then
-    managed_setup_note=" Managed OpenGrep was installed automatically because Install OpenGrep automatically is enabled."
-    if ! doctor_output="$("$GREPRULES" doctor --format json 2>&1)"; then
-      emit_context "SessionStart" "greprules installed managed OpenGrep, but readiness check failed: ${doctor_output}"
-      exit 0
-    fi
-    registry_ok="$(printf '%s' "$doctor_output" | json_field "registry.ok" 2>/dev/null || true)"
-    lock_exists="$(printf '%s' "$doctor_output" | json_field "lock.exists" 2>/dev/null || true)"
-    active_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.active.ok" 2>/dev/null || true)"
-    recommended="$(printf '%s' "$doctor_output" | json_field "recommendedCommands" 2>/dev/null || true)"
-    system_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.system.ok" 2>/dev/null || true)"
-    system_path="$(printf '%s' "$doctor_output" | json_field "opengrep.system.runtime.path" 2>/dev/null || true)"
-    system_version="$(printf '%s' "$doctor_output" | json_field "opengrep.system.runtime.version" 2>/dev/null || true)"
-  fi
+  active_mode="$(printf '%s' "$doctor_output" | json_field "config.config.opengrep.mode" 2>/dev/null || true)"
 
   if [[ "$registry_ok" == "true" && "$lock_exists" == "true" && "$active_ok" == "true" ]]; then
     log_msg "doctor ok"
@@ -276,28 +317,19 @@ doctor_context() {
 
   setup_guidance=""
   if [[ "$active_ok" != "true" ]]; then
-    case "$plugin_mode" in
-      system)
-        if [[ "$system_ok" == "true" ]]; then
-          setup_guidance=" System OpenGrep was detected at ${system_path:-opengrep}"
-          if [[ -n "$system_version" ]]; then
-            setup_guidance="${setup_guidance} (version ${system_version})"
-          fi
-          setup_guidance="${setup_guidance}, but the active runtime is still not ready. Check greprules doctor --format json."
-        else
-          setup_guidance=" Install OpenGrep automatically is off, and no system opengrep was found on PATH. Enable automatic install in plugin configuration or set OpenGrep executable path."
-        fi
-        ;;
-      path)
-        setup_guidance=" OpenGrep executable path is set to ${configured_path:-<empty>}, but it is not usable. Update the plugin configuration with an executable OpenGrep path or clear it to use automatic install."
-        ;;
-      *)
-        setup_guidance=" Install OpenGrep automatically is enabled, but managed OpenGrep is not ready. Check greprules setup-opengrep output or set OpenGrep executable path in plugin configuration."
-        ;;
-    esac
+    setup_guidance=" Run /greprules:configure or /greprules:doctor to choose an OpenGrep runtime."
+    if [[ "$system_ok" == "true" ]]; then
+      setup_guidance="${setup_guidance} System OpenGrep was detected at ${system_path:-opengrep}"
+      if [[ -n "$system_version" ]]; then
+        setup_guidance="${setup_guidance} (version ${system_version})"
+      fi
+      setup_guidance="${setup_guidance}."
+    else
+      setup_guidance="${setup_guidance} No system opengrep was found on PATH."
+    fi
   fi
 
-  emit_context "SessionStart" "greprules needs setup before automatic scans. Registry ready: ${registry_ok:-unknown}; lockfile exists: ${lock_exists:-unknown}; OpenGrep ready: ${active_ok:-unknown}. Recommended commands: ${recommended:-greprules doctor --format json}.${managed_setup_note}${setup_guidance}"
+  emit_context "SessionStart" "greprules needs setup before automatic scans. Registry ready: ${registry_ok:-unknown}; lockfile exists: ${lock_exists:-unknown}; OpenGrep ready: ${active_ok:-unknown}; configured OpenGrep mode: ${active_mode:-unknown}. Recommended commands: ${recommended:-greprules doctor --format json}.${setup_guidance}"
 }
 
 scan_if_dirty() {
@@ -327,20 +359,21 @@ scan_if_dirty() {
     exit 0
   fi
 
-  if ! ensure_git_repo; then
-    log_msg "scan skipped outside git repo: $PROJECT_DIR"
+  if ! ensure_project_dir; then
+    log_msg "scan skipped because project dir is not available: $PROJECT_DIR"
     exit 0
   fi
 
   local count
-  count="$(changed_file_count)"
+  prepare_scan_targets
+  count="$(scan_target_count)"
   if [[ "$count" == "0" ]]; then
-    rm -f "$DIRTY_MARKER" 2>/dev/null || true
-    log_msg "scan skipped; no changed files"
+    rm -f "$DIRTY_MARKER" "$DIRTY_FILES_PATH" "$SCAN_TARGETS_PATH" 2>/dev/null || true
+    log_msg "scan skipped; no edited files captured"
     exit 0
   fi
   if [[ "$count" -gt "$MAX_CHANGED_FILES" ]]; then
-    emit_context "Stop" "greprules automatic scan skipped because ${count} changed files exceed the automatic limit (${MAX_CHANGED_FILES}). Run /greprules:scan when ready."
+    emit_context "Stop" "greprules automatic scan skipped because ${count} edited files exceed the automatic limit (${MAX_CHANGED_FILES}). Run /greprules:scan when ready."
     exit 0
   fi
 
@@ -356,17 +389,6 @@ scan_if_dirty() {
   lock_exists="$(printf '%s' "$doctor_output" | json_field "lock.exists" 2>/dev/null || true)"
   active_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.active.ok" 2>/dev/null || true)"
   recommended="$(printf '%s' "$doctor_output" | json_field "recommendedCommands" 2>/dev/null || true)"
-
-  if setup_managed_opengrep_if_requested "Stop" "$active_ok"; then
-    if ! doctor_output="$("$GREPRULES" doctor --format json 2>&1)"; then
-      emit_context "Stop" "greprules installed managed OpenGrep, but readiness check failed: ${doctor_output}"
-      exit 0
-    fi
-    registry_ok="$(printf '%s' "$doctor_output" | json_field "registry.ok" 2>/dev/null || true)"
-    lock_exists="$(printf '%s' "$doctor_output" | json_field "lock.exists" 2>/dev/null || true)"
-    active_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.active.ok" 2>/dev/null || true)"
-    recommended="$(printf '%s' "$doctor_output" | json_field "recommendedCommands" 2>/dev/null || true)"
-  fi
 
   if [[ "$lock_exists" != "true" && "$registry_ok" == "true" ]]; then
     local fetch_output
@@ -389,9 +411,9 @@ scan_if_dirty() {
   fi
 
   local scan_output
-  if ! scan_output="$("$GREPRULES" scan --changed 2>&1)"; then
+  if ! scan_output="$("$GREPRULES" scan --targets-from "$SCAN_TARGETS_PATH" 2>&1)"; then
     log_msg "scan failed: $scan_output"
-    emit_context "Stop" "greprules automatic changed-file scan failed: ${scan_output}"
+    emit_context "Stop" "greprules automatic edited-file scan failed: ${scan_output}"
     exit 0
   fi
 
@@ -400,7 +422,7 @@ scan_if_dirty() {
   summary="$(summarize_agent_result "$agent_result" 2>&1 || true)"
   printf '%s\n' "$summary" > "$LAST_SUMMARY_PATH" 2>/dev/null || true
   date +%s > "$LAST_SCAN_PATH" 2>/dev/null || true
-  rm -f "$DIRTY_MARKER" 2>/dev/null || true
+  rm -f "$DIRTY_MARKER" "$DIRTY_FILES_PATH" "$SCAN_TARGETS_PATH" 2>/dev/null || true
   emit_context "Stop" "$summary"
 }
 

@@ -11,9 +11,8 @@ Rules:
 - Use repo-local config only for settings that are specific to this checkout and should not be committed.
 - Do not write `opengrep.path` to shared `.greprules/config.yaml`.
 - After changing config, run `greprules config inspect --format json` or `greprules doctor --format json` and summarize the effective config.
-- Claude Code plugin configuration exposes `install_opengrep` and `opengrep_path`; do not ask users to type `managed`, `system`, or `path` into plugin configuration.
-- Treat `opengrep_path` as highest priority, `install_opengrep=true` as managed OpenGrep, and `install_opengrep=false` as system OpenGrep.
-- Expose OpenGrep runtime choices as automatic install, system PATH, or advanced path; do not present `auto` as a user choice.
+- Do not use Claude Code plugin configuration for OpenGrep runtime selection.
+- Expose OpenGrep runtime choices as managed install, system PATH, or manual executable path.
 - If the user wants terminal or CI parity, write the setting with `greprules config set --global`.
 
 Common commands:
@@ -31,10 +30,15 @@ greprules doctor --format json
 Runtime selection workflow:
 
 1. Run `greprules doctor --format json`.
-2. If the user configured `opengrep_path`, validate that executable and use path mode.
-3. If the user chooses system OpenGrep, run `greprules config set opengrep.mode system --global`.
-4. If the user chooses managed OpenGrep, run `greprules config set opengrep.mode managed --global`, then `greprules setup-opengrep`.
-5. If the user chooses a custom path, verify it with `greprules doctor --engine path --opengrep-path <path> --format json`, then write `opengrep.mode=path` and `opengrep.path=<path>` to global config.
-6. Run `greprules doctor --format json` again and summarize readiness.
+2. If `opengrep.active.ok` is true and the user did not ask to change runtime, summarize readiness and stop.
+3. Check `opengrep.system.ok`, `opengrep.system.runtime.path`, and `opengrep.system.runtime.version` first.
+4. If the user has not already chosen a runtime, use AskUserQuestion when available; otherwise ask one concise question. Offer these choices:
+   - Use system OpenGrep on PATH. Recommend this when `opengrep.system.ok` is true.
+   - Install managed OpenGrep. Recommend this when no system OpenGrep is available or the user wants reproducible scans.
+   - Use a manual OpenGrep executable path. Ask for the absolute path before applying it.
+5. If the user chooses system OpenGrep, run `greprules config set opengrep.mode system --global`.
+6. If the user chooses managed OpenGrep, run `greprules config set opengrep.mode managed --global`, then `greprules setup-opengrep`.
+7. If the user chooses a manual path, verify it with `greprules doctor --engine path --opengrep-path <path> --format json`, then write `opengrep.mode=path` and `opengrep.path=<path>` to global config.
+8. Run `greprules doctor --format json` again and summarize readiness.
 
 If the user asks for a recommended default and no system OpenGrep is already available, prefer managed OpenGrep for reproducible community scans. If system OpenGrep is already available, ask before switching because system is faster to adopt but less reproducible across machines.

@@ -14,19 +14,5 @@
     "semgrep",
     "security",
     "rules"
-  ],
-  "userConfig": {
-    "install_opengrep": {
-      "type": "boolean",
-      "title": "Install OpenGrep automatically",
-      "description": "Recommended. When enabled, greprules downloads and manages OpenGrep automatically. Turn this off to use an existing opengrep on PATH.",
-      "default": true
-    },
-    "opengrep_path": {
-      "type": "file",
-      "title": "OpenGrep executable path",
-      "description": "Optional. Set this only when you want greprules to use a specific OpenGrep executable instead of automatic install or PATH lookup.",
-      "required": false
-    }
-  }
+  ]
 }

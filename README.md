@@ -9,7 +9,7 @@ The MVP scope is intentionally narrow:
 - recommend and fetch greprules.io packs
 - pin pack artifacts in `.greprules/lock.json`
 - install a managed OpenGrep binary
-- run changed-file or full scans
+- run changed-file, explicit-target, or full scans
 - write OpenGrep JSON, SARIF, and agent-readable JSON output
 
 Out of scope for this CLI MVP:
@@ -31,6 +31,8 @@ greprules recommend
 greprules fetch
 greprules setup-opengrep
 greprules scan --changed
+greprules scan --target path/to/file
+greprules scan --targets-from .greprules/out/targets.txt
 greprules scan --full
 greprules doctor --format json
 ```
@@ -142,17 +144,13 @@ Then reload Claude Code and use:
 /greprules:scan
 ```
 
-During plugin installation, configure OpenGrep with:
-
-- `Install OpenGrep automatically` enabled: greprules installs and uses managed OpenGrep. This is recommended.
-- `Install OpenGrep automatically` disabled: greprules uses an existing `opengrep` on `PATH`.
-- `OpenGrep executable path`: optional advanced override. If set, this path takes precedence over both automatic install and `PATH`.
+The plugin does not require install-time configuration. When `/greprules:doctor`, `/greprules:configure`, or `/greprules:scan` finds that OpenGrep is not ready, Claude first checks for a system `opengrep` on `PATH`, then asks whether to use system OpenGrep, install managed OpenGrep, or configure a manual executable path. The selected runtime is written with `greprules config set ... --global`, so terminals and CI can use the same setting.
 
 The plugin includes a `bin/greprules` wrapper and lifecycle hooks tuned for agent editing:
 
-- `SessionStart`: run `doctor` and report setup gaps. If automatic install is enabled and managed OpenGrep is missing, install managed OpenGrep. It never scans.
-- `PostToolUse` for `Edit`, `MultiEdit`, `Write`, and `NotebookEdit`: mark the workspace dirty. It never scans.
-- `Stop`: if the workspace is dirty, run one changed-file scan and inject a compact summary into Claude's next model context.
+- `SessionStart`: run `doctor` and report setup gaps. It never installs OpenGrep or scans.
+- `PostToolUse` for `Edit`, `MultiEdit`, `Write`, and `NotebookEdit`: capture the file path from Claude's actual edit event and mark the workspace dirty. It never scans.
+- `Stop`: if the workspace is dirty, scan the files Claude actually edited and inject a compact summary into Claude's next model context. This does not require a git repository.
 
 The wrapper resolves the real CLI in this order:
 
@@ -162,7 +160,7 @@ system PATH, excluding the plugin wrapper itself
 GitHub Release bootstrap into $CLAUDE_PLUGIN_DATA/greprules/v0.1.0/greprules
 ```
 
-Claude Code stores plugin configuration in its settings file, such as `~/.claude/settings.json` for user-scope installs. greprules does not edit that file directly; Claude Code passes plugin options as environment variables to the wrapper and hooks.
+OpenGrep runtime configuration lives in greprules config files, not Claude Code plugin settings. Use `greprules config inspect --format json` to inspect the effective configuration.
 
 For local development before a release exists, build and copy the CLI onto `PATH`:
 
