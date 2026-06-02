@@ -34,17 +34,31 @@ import os
 event_name = os.environ.get("HOOK_EVENT_NAME", "PostToolUse")
 message = os.environ.get("HOOK_MESSAGE", "").strip()
 if message:
-    print(json.dumps({
-        "hookSpecificOutput": {
-            "hookEventName": event_name,
-            "additionalContext": message,
+    if event_name in {"PostToolUse", "PostToolBatch", "UserPromptSubmit"}:
+        payload = {
+            "hookSpecificOutput": {
+                "hookEventName": event_name,
+                "additionalContext": message,
+            }
         }
-    }))
+    else:
+        payload = {
+            "continue": True,
+            "systemMessage": message,
+        }
+    print(json.dumps(payload))
 PY
   else
-    printf '{"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}}\n' \
-      "$event_name" \
-      "$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')"
+    local escaped
+    escaped="$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n' ' ')"
+    case "$event_name" in
+      PostToolUse|PostToolBatch|UserPromptSubmit)
+        printf '{"hookSpecificOutput":{"hookEventName":"%s","additionalContext":"%s"}}\n' "$event_name" "$escaped"
+        ;;
+      *)
+        printf '{"continue":true,"systemMessage":"%s"}\n' "$escaped"
+        ;;
+    esac
   fi
 }
 
