@@ -1,0 +1,9 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.code-review-graph/
+.greprules/
+dist/
+coverage.out
+/greprules

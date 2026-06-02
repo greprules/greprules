@@ -1,0 +1,14 @@
+{
+  "name": "greprules",
+  "description": "greprules Claude Code plugins for local OpenGrep scans with community rule packs.",
+  "owner": {
+    "name": "greprules"
+  },
+  "plugins": [
+    {
+      "name": "greprules",
+      "source": "./plugins/claude-code",
+      "description": "Fetch greprules.io rule packs, run OpenGrep scans, and summarize agent-readable results."
+    }
+  ]
+}

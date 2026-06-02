@@ -1,0 +1,19 @@
+{
+  "name": "greprules",
+  "description": "Use greprules to fetch greprules.io rule packs, run OpenGrep scans, and read agent-friendly results.",
+  "version": "0.1.0",
+  "author": {
+    "name": "greprules"
+  },
+  "homepage": "https://greprules.io",
+  "repository": "https://github.com/greprules/greprules",
+  "license": "Apache-2.0",
+  "hooks": "./hooks/hooks.json",
+  "keywords": [
+    "sast",
+    "opengrep",
+    "semgrep",
+    "security",
+    "rules"
+  ]
+}
