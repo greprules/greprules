@@ -8,7 +8,6 @@
   "homepage": "https://greprules.io",
   "repository": "https://github.com/greprules/greprules",
   "license": "Apache-2.0",
-  "hooks": "./hooks/hooks.json",
   "keywords": [
     "sast",
     "opengrep",
