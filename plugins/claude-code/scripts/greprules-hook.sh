@@ -184,18 +184,31 @@ doctor_context() {
     exit 0
   fi
 
-  local registry_ok lock_exists active_ok recommended
+  local registry_ok lock_exists active_ok recommended system_ok system_path system_version plugin_mode setup_guidance
   registry_ok="$(printf '%s' "$doctor_output" | json_field "registry.ok" 2>/dev/null || true)"
   lock_exists="$(printf '%s' "$doctor_output" | json_field "lock.exists" 2>/dev/null || true)"
   active_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.active.ok" 2>/dev/null || true)"
   recommended="$(printf '%s' "$doctor_output" | json_field "recommendedCommands" 2>/dev/null || true)"
+  system_ok="$(printf '%s' "$doctor_output" | json_field "opengrep.system.ok" 2>/dev/null || true)"
+  system_path="$(printf '%s' "$doctor_output" | json_field "opengrep.system.runtime.path" 2>/dev/null || true)"
+  system_version="$(printf '%s' "$doctor_output" | json_field "opengrep.system.runtime.version" 2>/dev/null || true)"
+  plugin_mode="${CLAUDE_PLUGIN_OPTION_OPENGREP_MODE:-${CLAUDE_PLUGIN_OPTION_opengrep_mode:-auto}}"
 
   if [[ "$registry_ok" == "true" && "$lock_exists" == "true" && "$active_ok" == "true" ]]; then
     log_msg "doctor ok"
     exit 0
   fi
 
-  emit_context "SessionStart" "greprules needs setup before automatic scans. Registry ready: ${registry_ok:-unknown}; lockfile exists: ${lock_exists:-unknown}; OpenGrep ready: ${active_ok:-unknown}. Recommended commands: ${recommended:-greprules doctor --format json}"
+  setup_guidance=""
+  if [[ "$active_ok" != "true" && "$system_ok" == "true" ]]; then
+    setup_guidance=" System OpenGrep was detected at ${system_path:-opengrep}"
+    if [[ -n "$system_version" ]]; then
+      setup_guidance="${setup_guidance} (version ${system_version})"
+    fi
+    setup_guidance="${setup_guidance}. Ask the user whether to use system OpenGrep or install managed OpenGrep. If they choose system, run greprules config set opengrep.mode system --global. If they choose managed, run greprules setup-opengrep. Current plugin opengrep_mode option: ${plugin_mode:-auto}."
+  fi
+
+  emit_context "SessionStart" "greprules needs setup before automatic scans. Registry ready: ${registry_ok:-unknown}; lockfile exists: ${lock_exists:-unknown}; OpenGrep ready: ${active_ok:-unknown}. Recommended commands: ${recommended:-greprules doctor --format json}.${setup_guidance}"
 }
 
 scan_if_dirty() {

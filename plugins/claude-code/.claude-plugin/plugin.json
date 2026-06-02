@@ -14,5 +14,19 @@
     "semgrep",
     "security",
     "rules"
-  ]
+  ],
+  "userConfig": {
+    "opengrep_mode": {
+      "type": "string",
+      "title": "OpenGrep runtime mode",
+      "description": "OpenGrep runtime for greprules in Claude Code. Use auto, managed, system, or path.",
+      "default": "auto"
+    },
+    "opengrep_path": {
+      "type": "file",
+      "title": "OpenGrep executable path",
+      "description": "Optional absolute path to an OpenGrep executable. Used when opengrep_mode is path, or as a path override.",
+      "required": false
+    }
+  }
 }

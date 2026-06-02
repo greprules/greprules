@@ -6,12 +6,31 @@ GREPRULES_REPO="${GREPRULES_REPO:-greprules/greprules}"
 SELF_PATH="${BASH_SOURCE[0]}"
 SELF_DIR="$(CDPATH= cd -- "$(dirname -- "$SELF_PATH")" && pwd)"
 
-if [[ -n "${GREPRULES_CLI_PATH:-}" && -x "${GREPRULES_CLI_PATH}" ]]; then
-  exec "${GREPRULES_CLI_PATH}" "$@"
-fi
+apply_plugin_options() {
+  local mode="${CLAUDE_PLUGIN_OPTION_OPENGREP_MODE:-${CLAUDE_PLUGIN_OPTION_opengrep_mode:-}}"
+  local opengrep_path="${CLAUDE_PLUGIN_OPTION_OPENGREP_PATH:-${CLAUDE_PLUGIN_OPTION_opengrep_path:-}}"
 
-if [[ -n "${CLAUDE_PLUGIN_DATA:-}" && -x "${CLAUDE_PLUGIN_DATA}/greprules" ]]; then
-  exec "${CLAUDE_PLUGIN_DATA}/greprules" "$@"
+  mode="$(printf '%s' "$mode" | tr '[:upper:]' '[:lower:]')"
+  case "$mode" in
+    managed|system|path)
+      export GREPRULES_ENGINE="$mode"
+      ;;
+    ""|auto)
+      ;;
+    *)
+      printf 'warning: ignoring unsupported greprules opengrep_mode plugin option: %s\n' "$mode" >&2
+      ;;
+  esac
+
+  if [[ -n "$opengrep_path" ]]; then
+    export GREPRULES_OPENGREP_PATH="$opengrep_path"
+  fi
+}
+
+apply_plugin_options
+
+if [[ -n "${GREPRULES_CLI_PATH:-}" && -f "${GREPRULES_CLI_PATH}" && -x "${GREPRULES_CLI_PATH}" ]]; then
+  exec "${GREPRULES_CLI_PATH}" "$@"
 fi
 
 SELF_REAL="$(cd "$SELF_DIR" && pwd -P)/$(basename "$SELF_PATH")"
@@ -22,7 +41,7 @@ for DIR in "${PATH_DIRS[@]}"; do
   [[ -z "$DIR_REAL" ]] && continue
   [[ "$DIR_REAL" == "$SELF_DIR" ]] && continue
   CANDIDATE="$DIR/greprules"
-  if [[ -x "$CANDIDATE" ]]; then
+  if [[ -f "$CANDIDATE" && -x "$CANDIDATE" ]]; then
     CANDIDATE_REAL="$(cd "$(dirname "$CANDIDATE")" && pwd -P)/$(basename "$CANDIDATE")"
     [[ "$CANDIDATE_REAL" == "$SELF_REAL" ]] && continue
     exec "$CANDIDATE" "$@"
@@ -126,7 +145,7 @@ bootstrap_managed_binary() {
   if [[ "$os" == "windows" ]]; then
     managed_binary="${version_dir}/greprules.exe"
   fi
-  if [[ -x "$managed_binary" ]]; then
+  if [[ -f "$managed_binary" && -x "$managed_binary" ]]; then
     exec "$managed_binary" "$@"
   fi
 

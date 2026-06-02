@@ -134,6 +134,14 @@ claude plugin marketplace add greprules/greprules --scope user
 claude plugin install greprules@greprules --scope user
 ```
 
+To choose the OpenGrep runtime during plugin install, pass a plugin option:
+
+```bash
+claude plugin install greprules@greprules --scope user --config opengrep_mode=system
+claude plugin install greprules@greprules --scope user --config opengrep_mode=managed
+claude plugin install greprules@greprules --scope user --config opengrep_mode=path --config opengrep_path=/absolute/path/to/opengrep
+```
+
 Then reload Claude Code and use:
 
 ```text
@@ -152,10 +160,11 @@ The wrapper resolves the real CLI in this order:
 
 ```text
 GREPRULES_CLI_PATH
-$CLAUDE_PLUGIN_DATA/greprules
 system PATH, excluding the plugin wrapper itself
 GitHub Release bootstrap into $CLAUDE_PLUGIN_DATA/greprules/v0.1.0/greprules
 ```
+
+If `opengrep_mode` is left as `auto`, the plugin does not override CLI config. On session start, `greprules doctor --format json` reports setup gaps; when system OpenGrep is detected but the active runtime is not ready, Claude is instructed to ask whether to use system OpenGrep or install managed OpenGrep.
 
 For local development before a release exists, build and copy the CLI onto `PATH`:
 

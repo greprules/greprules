@@ -169,6 +169,49 @@ func TestConfigSetGlobalAndInspect(t *testing.T) {
 	}
 }
 
+func TestDoctorRecommendationsPreferSystemWhenManagedIsMissing(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.OpenGrep.Mode = "managed"
+	cfg.OpenGrep.Managed = true
+
+	report := doctorReport{
+		OpenGrep: opengrepStatus{
+			Managed: runtimeCheck{OK: false, Error: "managed OpenGrep runtime is not installed"},
+			System:  runtimeCheck{OK: true},
+			Active:  runtimeCheck{OK: false, Error: "managed OpenGrep runtime is not installed"},
+		},
+	}
+
+	addOpenGrepRecommendations(&report, cfg)
+
+	if !containsString(report.RecommendedCommands, "greprules config set opengrep.mode system --global") {
+		t.Fatalf("expected system config recommendation, got %#v", report.RecommendedCommands)
+	}
+	if containsString(report.RecommendedCommands, "greprules setup-opengrep") {
+		t.Fatalf("expected system recommendation to take precedence over setup, got %#v", report.RecommendedCommands)
+	}
+}
+
+func TestDoctorRecommendationsUseManagedSetupWhenNoRuntimeIsReady(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.OpenGrep.Mode = "managed"
+	cfg.OpenGrep.Managed = true
+
+	report := doctorReport{
+		OpenGrep: opengrepStatus{
+			Managed: runtimeCheck{OK: false, Error: "managed OpenGrep runtime is not installed"},
+			System:  runtimeCheck{OK: false, Error: "system opengrep not found"},
+			Active:  runtimeCheck{OK: false, Error: "managed OpenGrep runtime is not installed"},
+		},
+	}
+
+	addOpenGrepRecommendations(&report, cfg)
+
+	if !containsString(report.RecommendedCommands, "greprules setup-opengrep") {
+		t.Fatalf("expected setup recommendation, got %#v", report.RecommendedCommands)
+	}
+}
+
 func TestRepoConfigOpenGrepPathIsIgnored(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.test\n")
@@ -220,6 +263,15 @@ func makePackTarball(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return buf.Bytes()
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func writeFile(t *testing.T, path string, content string) {

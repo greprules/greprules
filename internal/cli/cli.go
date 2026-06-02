@@ -634,9 +634,6 @@ func runDoctor(ctx context.Context, args []string) error {
 	}
 	if runtimeInfo, err := opengrep.Installed(cfg.OpenGrep.Version, ""); err != nil {
 		report.OpenGrep.Managed = runtimeCheck{OK: false, Error: err.Error()}
-		if cfg.OpenGrep.Mode == "managed" {
-			report.RecommendedCommands = append(report.RecommendedCommands, "greprules setup-opengrep")
-		}
 	} else {
 		report.OpenGrep.Managed = runtimeCheck{OK: true, Runtime: &runtimeInfo}
 	}
@@ -647,12 +644,10 @@ func runDoctor(ctx context.Context, args []string) error {
 	}
 	if runtimeInfo, err := runtimeFromConfigOrLock(config.Lock{}, cfg, *engineMode, *opengrepPath, *opengrepVersion); err != nil {
 		report.OpenGrep.Active = runtimeCheck{OK: false, Error: err.Error()}
-		if cfg.OpenGrep.Mode == "system" {
-			report.RecommendedCommands = append(report.RecommendedCommands, "greprules config set opengrep.mode managed --global")
-		}
 	} else {
 		report.OpenGrep.Active = runtimeCheck{OK: true, Runtime: &runtimeInfo}
 	}
+	addOpenGrepRecommendations(&report, cfg)
 	report.Status = "ok"
 	if !report.Registry.OK || !report.Lock.Exists || !report.OpenGrep.Active.OK {
 		report.Status = "needs_attention"
@@ -700,6 +695,48 @@ type runtimeCheck struct {
 	OK      bool              `json:"ok"`
 	Runtime *opengrep.Runtime `json:"runtime,omitempty"`
 	Error   string            `json:"error,omitempty"`
+}
+
+func addOpenGrepRecommendations(report *doctorReport, cfg config.Config) {
+	if report.OpenGrep.Active.OK {
+		return
+	}
+
+	switch cfg.OpenGrep.Mode {
+	case "managed":
+		if report.OpenGrep.System.OK {
+			addRecommendedCommand(report, "greprules config set opengrep.mode system --global")
+			return
+		}
+		addRecommendedCommand(report, "greprules setup-opengrep")
+	case "system":
+		if report.OpenGrep.Managed.OK {
+			addRecommendedCommand(report, "greprules config set opengrep.mode managed --global")
+			return
+		}
+		addRecommendedCommand(report, "greprules setup-opengrep")
+	case "path":
+		if report.OpenGrep.System.OK {
+			addRecommendedCommand(report, "greprules config set opengrep.mode system --global")
+			return
+		}
+		if report.OpenGrep.Managed.OK {
+			addRecommendedCommand(report, "greprules config set opengrep.mode managed --global")
+			return
+		}
+		addRecommendedCommand(report, "greprules setup-opengrep")
+	default:
+		addRecommendedCommand(report, "greprules doctor --format json")
+	}
+}
+
+func addRecommendedCommand(report *doctorReport, command string) {
+	for _, existing := range report.RecommendedCommands {
+		if existing == command {
+			return
+		}
+	}
+	report.RecommendedCommands = append(report.RecommendedCommands, command)
 }
 
 func printDoctorText(report doctorReport, debug bool) {
