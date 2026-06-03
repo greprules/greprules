@@ -2,7 +2,7 @@
 
 Agent plugin for fetching trusted SAST rule packs from greprules.io and scanning local code changes with OpenGrep.
 
-greprules is designed for local coding agents first. The Claude Code and Hermes plugins give agents slash commands for checking setup, configuring OpenGrep, fetching rule packs, and scanning local code changes. The Go CLI is the local runtime behind those commands.
+greprules is designed for local coding agents first. The Claude Code and Hermes plugins give agents slash commands for checking setup, configuring OpenGrep, selecting rule packs from code context, fetching those packs, and scanning local code changes. The Go CLI is the deterministic local runtime behind those commands.
 
 ## Quick Start
 
@@ -18,11 +18,12 @@ Run these inside Claude Code:
 /greprules:scan-edited
 ```
 
-`/greprules:doctor` is the best first command. It checks registry access, OpenGrep runtime readiness, and local rule-pack fetch state. A missing `.greprules/lock.json` means rule packs have not been fetched yet; scan commands can fetch them automatically when the registry is reachable.
+`/greprules:doctor` is the best first command. It checks registry access, OpenGrep runtime readiness, and local rule-pack fetch state. A missing `.greprules/lock.json` means rule packs have not been fetched yet; scan commands select packs from target context before fetching when the registry is reachable.
 
 ## What It Does
 
-- Fetches reusable SAST rule packs from greprules.io.
+- Lets agents select reusable SAST rule packs from greprules.io based on target code context.
+- Fetches the selected packs reproducibly through the CLI.
 - Configures OpenGrep for local scans.
 - Tracks files edited by Claude Code.
 - Scans changed files or explicit targets before the agent finishes.
@@ -68,7 +69,7 @@ The plugin does not require install-time configuration. Runtime choices are stor
 
 The Claude Code plugin includes lightweight hooks for agent editing sessions:
 
-- `SessionStart` checks registry and OpenGrep readiness. Missing rule packs are not reported as setup gaps because scan commands can fetch them automatically.
+- `SessionStart` checks registry and OpenGrep readiness. Missing rule packs are not reported as setup gaps because scan commands can select and fetch packs from target context.
 - `PostToolUse` records files Claude edited with `Edit`, `MultiEdit`, `Write`, or `NotebookEdit`.
 - `Stop` scans the edited files once, then asks Claude to review the result before finishing.
 
@@ -171,7 +172,7 @@ More commands:
 ```bash
 greprules detect --format json
 greprules config inspect --format json
-greprules recommend
+greprules recommend --format json --agent --target path/to/file
 greprules setup-opengrep
 greprules scan --target path/to/file
 greprules scan --targets-from .greprules/out/targets.txt

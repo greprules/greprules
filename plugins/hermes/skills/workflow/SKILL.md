@@ -15,4 +15,6 @@ Available slash commands:
 
 Aliases are also available: `/greprules-doctor`, `/greprules-scan-edited`, `/greprules-scan-working-tree`, `/greprules-scan-target <path>`, and `/greprules-scan-full`.
 
+When rule packs are not fetched yet, use agent-assisted selection: inspect the target files and run `greprules recommend --format json --agent` with `--target`, `--changed`, or `--targets-from` matching the scan scope. Choose only slugs present in `availablePacks`, fetch them with explicit `greprules fetch --pack <slug>` arguments, then rerun the scan.
+
 The `pre_llm_call` hook can inject compact edited-file scan results before the next model turn. Set `GREPRULES_HERMES_AUTO_SCAN=false` to disable automatic scan context injection while keeping manual commands available.

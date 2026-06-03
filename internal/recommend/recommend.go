@@ -15,6 +15,35 @@ type Candidate struct {
 	Available  bool     `json:"available"`
 }
 
+type AgentContext struct {
+	SchemaVersion       string                 `json:"schemaVersion"`
+	Root                string                 `json:"root"`
+	Targets             []string               `json:"targets,omitempty"`
+	Detection           detect.Result          `json:"detection"`
+	Candidates          []Candidate            `json:"candidates"`
+	AvailablePacks      []registry.PackSummary `json:"availablePacks,omitempty"`
+	NeedsAgentSelection bool                   `json:"needsAgentSelection"`
+	Guidance            []string               `json:"guidance"`
+}
+
+func BuildAgentContext(result detect.Result, available []registry.PackSummary, candidates []Candidate) AgentContext {
+	return AgentContext{
+		SchemaVersion:       "greprules.recommend.agent.v1",
+		Root:                result.Root,
+		Targets:             result.Targets,
+		Detection:           result,
+		Candidates:          candidates,
+		AvailablePacks:      available,
+		NeedsAgentSelection: len(candidates) == 0,
+		Guidance: []string{
+			"Use candidates when confidence and target context match the user's scan request.",
+			"If candidates are empty or incomplete, inspect targets and availablePacks, choose explicit pack slugs, then run greprules fetch --pack <slug>.",
+			"Prefer target-specific language/framework packs over broad repository packs for edited-file or explicit-target scans.",
+			"Do not invent pack slugs; select only slugs present in availablePacks unless the user explicitly provided a pack slug.",
+		},
+	}
+}
+
 func ForDetection(result detect.Result, available []registry.PackSummary) []Candidate {
 	availableSet := map[string]registry.PackSummary{}
 	for _, pack := range available {

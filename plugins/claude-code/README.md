@@ -18,16 +18,16 @@ Skills:
 
 - `/greprules:doctor`: inspect readiness and recommend next commands
 - `/greprules:configure`: choose managed, system, or manual-path OpenGrep through the CLI
-- `/greprules:scan-edited`: fetch packs if needed, scan files Claude Code edited in this session, and summarize findings
-- `/greprules:scan-working-tree`: fetch packs if needed, scan git working tree, staged, and untracked files, and summarize findings
-- `/greprules:scan-target <path>`: fetch packs if needed, scan explicit files or directories, and summarize findings
-- `/greprules:scan-full`: fetch packs if needed, scan the full repository, and summarize findings
+- `/greprules:scan-edited`: select rule packs from edited-file context, fetch them if needed, scan files Claude Code edited in this session, and summarize findings
+- `/greprules:scan-working-tree`: select rule packs from git changed-file context, fetch them if needed, scan git working tree, staged, and untracked files, and summarize findings
+- `/greprules:scan-target <path>`: select rule packs from explicit target context, fetch them if needed, scan files or directories, and summarize findings
+- `/greprules:scan-full`: select rule packs from repository context, fetch them if needed, scan the full repository, and summarize findings
 
 Automatic hooks:
 
 - `SessionStart` runs `greprules doctor --format json` and reports registry or OpenGrep setup gaps. It does not install OpenGrep or scan. Missing rule packs are not reported as setup gaps because scan commands can fetch them automatically.
 - `PostToolUse` runs after Claude Code edits files with `Edit`, `MultiEdit`, `Write`, or `NotebookEdit`, captures edited file paths from the hook input, filters them to code and security-relevant config candidates, and marks the workspace dirty. It does not scan.
-- `Stop` fetches rule packs if needed, verifies OpenGrep readiness, runs one targeted scan over files Claude actually edited, and blocks the stop once with a compact verification prompt. Automatic scan state is one-shot after a scan, terminal skip, or failure. It works in non-git directories.
+- `Stop` attempts target-aware rule-pack selection for files Claude actually edited, fetches selected packs if needed, verifies OpenGrep readiness, runs one targeted scan, and blocks the stop once with a compact verification prompt. If deterministic pack selection is insufficient, it blocks with instructions for Claude to inspect available packs and choose explicit slugs. Automatic scan state is one-shot after a scan, terminal skip, or failure. It works in non-git directories.
 - Hook entries execute `scripts/greprules-hook.py`. The script handles Claude hook JSON and StopBlock output, then delegates state and scan work to the provider-neutral `greprules agent-state` and `greprules agent-scan` primitives.
 - Set `GREPRULES_AUTO_SCAN=false` before starting Claude Code to disable the automatic Stop hook scan and block for a session. Edited-file tracking stays enabled so `/greprules:scan-edited` can still be run manually; a successful manual edited-file scan clears the tracked state.
 - Set `GREPRULES_TRACK_EDITED_FILES=false` before starting Claude Code only when you also want to disable edited-file tracking.

@@ -286,7 +286,14 @@ func runAgentScanAfterReadiness(ctx context.Context, options agentDirectScanOpti
 	}
 	if !report.Lock.Exists && report.Registry.OK {
 		var fetchOutput bytes.Buffer
-		if err := runFetchWithOptions(ctx, []string{"--root", options.Root}, fetchCommandOptions{quiet: true, stdout: &fetchOutput}); err != nil {
+		fetchArgs := fetchArgsForAgentScan(options.Root, options.ScanArgs)
+		if err := runFetchWithOptions(ctx, fetchArgs, fetchCommandOptions{quiet: true, stdout: &fetchOutput}); err != nil {
+			if errors.Is(err, errNoPacksSelected) {
+				return agentScanOutcome{
+					Status:  "needs_pack_selection",
+					Message: agentPackSelectionMessage(options.Root, options.ScanArgs),
+				}, nil
+			}
 			message := strings.TrimSpace(fetchOutput.String() + "\n" + err.Error())
 			return agentScanOutcome{Status: "skipped", Message: options.Messages.FetchFailedPrefix + message}, nil
 		}
@@ -334,6 +341,50 @@ func runAgentScanAfterReadiness(ctx context.Context, options agentDirectScanOpti
 		agentstate.SummaryOptions{Automatic: options.Automatic, Label: options.Label},
 	)
 	return agentScanOutcome{Status: "scanned", Message: summary, Summary: summary}, nil
+}
+
+func fetchArgsForAgentScan(root string, scanArgs []string) []string {
+	args := []string{"--root", root}
+	for index := 0; index < len(scanArgs); index++ {
+		arg := scanArgs[index]
+		switch {
+		case arg == "--target" && index+1 < len(scanArgs):
+			args = append(args, "--target", scanArgs[index+1])
+			index++
+		case strings.HasPrefix(arg, "--target="):
+			args = append(args, arg)
+		case arg == "--targets-from" && index+1 < len(scanArgs):
+			args = append(args, "--targets-from", scanArgs[index+1])
+			index++
+		case strings.HasPrefix(arg, "--targets-from="):
+			args = append(args, arg)
+		case arg == "--changed" || strings.HasPrefix(arg, "--changed="):
+			args = append(args, arg)
+		}
+	}
+	return args
+}
+
+func agentPackSelectionMessage(root string, scanArgs []string) string {
+	recommendArgs := []string{"greprules", "recommend", "--root", root, "--format", "json", "--agent"}
+	for index := 0; index < len(scanArgs); index++ {
+		arg := scanArgs[index]
+		switch {
+		case arg == "--target" && index+1 < len(scanArgs):
+			recommendArgs = append(recommendArgs, "--target", scanArgs[index+1])
+			index++
+		case strings.HasPrefix(arg, "--target="):
+			recommendArgs = append(recommendArgs, arg)
+		case arg == "--targets-from" && index+1 < len(scanArgs):
+			recommendArgs = append(recommendArgs, "--targets-from", scanArgs[index+1])
+			index++
+		case strings.HasPrefix(arg, "--targets-from="):
+			recommendArgs = append(recommendArgs, arg)
+		case arg == "--changed" || strings.HasPrefix(arg, "--changed="):
+			recommendArgs = append(recommendArgs, arg)
+		}
+	}
+	return "greprules needs agent-assisted rule-pack selection before scanning. Run `" + strings.Join(recommendArgs, " ") + "`, inspect detection, targets, availablePacks, and candidates, choose explicit pack slugs that match the scan target, run `greprules fetch --pack <slug>` for the chosen packs, then rerun the greprules scan. Do not invent pack slugs."
 }
 
 func defaultAgentScanMessages(automatic bool, label string) agentScanMessageOptions {

@@ -266,11 +266,15 @@ def scan_if_dirty(root: Path, payload: Dict[str, Any]) -> int:
     message = string_from_any(outcome.get("message"))
     if not message:
         return 0
-    if outcome.get("status") == "scanned":
+    status = outcome.get("status")
+    if status == "scanned":
         try:
             (state_dir(root) / "last-summary.txt").write_text(message + "\n", encoding="utf-8")
         except Exception:
             pass
+        emit_block(message)
+    elif status == "needs_pack_selection":
+        log_msg(root, "agent pack selection required: " + message)
         emit_block(message)
     else:
         log_msg(root, "scan skipped or failed: " + message)

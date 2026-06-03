@@ -47,6 +47,26 @@ func TestDetectPythonWebProject(t *testing.T) {
 	}
 }
 
+func TestDetectTargetsUsesSourceAndNearbyManifest(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "packages", "api", "pyproject.toml"), "[project]\ndependencies = [\"fastapi\"]\n")
+	writeFile(t, filepath.Join(root, "packages", "api", "src", "main.py"), "from fastapi import FastAPI\napp = FastAPI()\n")
+
+	result, err := DetectTargets(root, []string{filepath.Join("packages", "api", "src", "main.py")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := result.Targets, []string{filepath.Join("packages", "api", "src", "main.py")}; len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("targets = %#v, want %#v", got, want)
+	}
+	if !hasSignal(result.Languages, "python") {
+		t.Fatalf("expected python language, got %#v", result.Languages)
+	}
+	if !hasSignal(result.Frameworks, "fastapi") {
+		t.Fatalf("expected fastapi framework, got %#v", result.Frameworks)
+	}
+}
+
 func writeFile(t *testing.T, path string, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

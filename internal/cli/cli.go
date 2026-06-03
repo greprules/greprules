@@ -20,6 +20,7 @@ import (
 	"github.com/greprules/greprules/internal/config"
 	"github.com/greprules/greprules/internal/detect"
 	"github.com/greprules/greprules/internal/doctor"
+	"github.com/greprules/greprules/internal/gitutil"
 	"github.com/greprules/greprules/internal/hash"
 	"github.com/greprules/greprules/internal/opengrep"
 	"github.com/greprules/greprules/internal/projectpath"
@@ -100,8 +101,8 @@ Usage:
   greprules init --mode auto
   greprules config inspect --format json
   greprules config set opengrep.mode system --global
-  greprules recommend
-  greprules fetch [--pack PACK]
+  greprules recommend [--agent] [--changed|--target PATH|--targets-from FILE]
+  greprules fetch [--pack PACK|--changed|--target PATH|--targets-from FILE]
   greprules setup-opengrep [--version latest]
   greprules scan [--changed|--full|--target PATH|--targets-from FILE] [--engine managed|system|path]
   greprules scan-edited [--engine managed|system|path]
@@ -332,6 +333,11 @@ func runRecommend(ctx context.Context, args []string) error {
 	rootFlag := fs.String("root", ".", "repo root or child path")
 	registryURL := fs.String("registry", "", "registry URL override")
 	noNetwork := fs.Bool("no-network", false, "skip registry availability lookup")
+	agent := fs.Bool("agent", false, "print agent-assisted selection context")
+	changed := fs.Bool("changed", false, "recommend for git changed, staged, and untracked files")
+	targetsFrom := fs.String("targets-from", "", "newline-delimited file of scan targets relative to root")
+	var targetFlags stringList
+	fs.Var(&targetFlags, "target", "explicit scan target path, repeatable or comma-separated")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -344,7 +350,11 @@ func runRecommend(ctx context.Context, args []string) error {
 	if *registryURL == "" {
 		*registryURL = cfg.Registry
 	}
-	result, err := detect.Detect(root)
+	rawTargets, err := collectTargetInputs(root, targetFlags, *targetsFrom, *changed)
+	if err != nil {
+		return err
+	}
+	result, err := detectForTargets(root, rawTargets)
 	if err != nil {
 		return err
 	}
@@ -354,6 +364,9 @@ func runRecommend(ctx context.Context, args []string) error {
 	}
 	candidates := recommend.ForDetection(result, packs)
 	if *format == "json" {
+		if *agent {
+			return printJSON(recommend.BuildAgentContext(result, packs, candidates))
+		}
 		return printJSON(candidates)
 	}
 	for _, candidate := range candidates {
@@ -362,10 +375,45 @@ func runRecommend(ctx context.Context, args []string) error {
 	return nil
 }
 
+func collectTargetInputs(root string, targets []string, targetsFrom string, changed bool) ([]string, error) {
+	rawTargets := append([]string{}, targets...)
+	if changed {
+		changedFiles, err := gitutil.ChangedFiles(root)
+		if err != nil {
+			return nil, err
+		}
+		rawTargets = append(rawTargets, changedFiles...)
+	}
+	if targetsFrom == "" {
+		return rawTargets, nil
+	}
+	data, err := os.ReadFile(targetsFrom)
+	if err != nil {
+		return nil, fmt.Errorf("read targets file: %w", err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		rawTargets = append(rawTargets, line)
+	}
+	return rawTargets, nil
+}
+
+func detectForTargets(root string, rawTargets []string) (detect.Result, error) {
+	if len(rawTargets) > 0 {
+		return detect.DetectTargets(root, rawTargets)
+	}
+	return detect.Detect(root)
+}
+
 type fetchCommandOptions struct {
 	quiet  bool
 	stdout io.Writer
 }
+
+var errNoPacksSelected = errors.New("no packs selected")
 
 func runFetch(ctx context.Context, args []string) error {
 	return runFetchWithOptions(ctx, args, fetchCommandOptions{stdout: os.Stdout})
@@ -375,8 +423,12 @@ func runFetchWithOptions(ctx context.Context, args []string, options fetchComman
 	fs := flag.NewFlagSet("fetch", flag.ContinueOnError)
 	rootFlag := fs.String("root", ".", "repo root or child path")
 	registryURL := fs.String("registry", "", "registry URL override")
+	changed := fs.Bool("changed", false, "fetch packs for git changed, staged, and untracked files")
+	targetsFrom := fs.String("targets-from", "", "newline-delimited file of scan targets relative to root")
 	var packFlags stringList
 	fs.Var(&packFlags, "pack", "pack slug, repeatable or comma-separated")
+	var targetFlags stringList
+	fs.Var(&targetFlags, "target", "explicit scan target path, repeatable or comma-separated")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -400,7 +452,11 @@ func runFetchWithOptions(ctx context.Context, args []string, options fetchComman
 	}
 	client := registry.New(cfg.Registry)
 	if len(packIDs) == 0 {
-		result, err := detect.Detect(root)
+		rawTargets, err := collectTargetInputs(root, targetFlags, *targetsFrom, *changed)
+		if err != nil {
+			return err
+		}
+		result, err := detectForTargets(root, rawTargets)
 		if err != nil {
 			return err
 		}
@@ -408,7 +464,7 @@ func runFetchWithOptions(ctx context.Context, args []string, options fetchComman
 		packIDs = recommend.PackIDs(recommend.ForDetection(result, available))
 	}
 	if len(packIDs) == 0 {
-		return errors.New("no packs selected; use --pack or check detection")
+		return fmt.Errorf("%w; use --pack or run greprules recommend --format json --agent with the same targets", errNoPacksSelected)
 	}
 	lockedPacks := make([]config.LockedPack, 0, len(packIDs))
 	for _, packID := range packIDs {

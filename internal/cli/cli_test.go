@@ -16,6 +16,7 @@ import (
 
 	"github.com/greprules/greprules/internal/config"
 	"github.com/greprules/greprules/internal/doctor"
+	"github.com/greprules/greprules/internal/recommend"
 )
 
 func TestRunFetchWritesLockAndCache(t *testing.T) {
@@ -47,6 +48,73 @@ func TestRunFetchWritesLockAndCache(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, lock.Packs[0].RulePath, "example.yaml")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRunRecommendAgentContextUsesTargetSignals(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "src", "main.py"), "from fastapi import FastAPI\napp = FastAPI()\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/packs" {
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"python-web-security","name":"Python Web Security","languages":["python"]}]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+
+	var stdout bytes.Buffer
+	withStdout(t, &stdout, func() {
+		if err := runRecommend(t.Context(), []string{"--root", root, "--registry", server.URL, "--format", "json", "--agent", "--target", "src/main.py"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var context recommend.AgentContext
+	if err := json.Unmarshal(stdout.Bytes(), &context); err != nil {
+		t.Fatalf("expected agent context JSON, got %q: %v", stdout.String(), err)
+	}
+	if context.SchemaVersion != "greprules.recommend.agent.v1" {
+		t.Fatalf("unexpected schema: %#v", context)
+	}
+	if got := strings.Join(recommend.PackIDs(context.Candidates), ","); got != "python-web-security" {
+		t.Fatalf("expected python web candidate, got %#v", context.Candidates)
+	}
+	if len(context.AvailablePacks) != 1 || context.AvailablePacks[0].Slug != "python-web-security" {
+		t.Fatalf("expected available packs in agent context, got %#v", context.AvailablePacks)
+	}
+}
+
+func TestRunFetchUsesTargetAwareRecommendation(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "src", "main.py"), "from fastapi import FastAPI\napp = FastAPI()\n")
+	tarball := makePackTarball(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/packs":
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"python-web-security","name":"Python Web Security","languages":["python"]}]}`))
+		case "/api/packs/python-web-security/manifest.json":
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"schema_version":1,"slug":"python-web-security","build_id":"build-1","total_rules":1,"languages":["python"],"rules":[{"slug":"example","yaml_path":"rules/example.yaml"}]}`))
+		case "/api/packs/python-web-security/latest.tar.gz":
+			w.Header().Set("content-type", "application/gzip")
+			_, _ = w.Write(tarball)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	if err := runFetch(t.Context(), []string{"--root", root, "--registry", server.URL, "--target", "src/main.py"}); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := config.LoadLock(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lock.Packs) != 1 || lock.Packs[0].ID != "python-web-security" {
+		t.Fatalf("unexpected lock: %#v", lock)
 	}
 }
 

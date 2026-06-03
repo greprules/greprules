@@ -11,12 +11,14 @@ Workflow:
 1. Verify the CLI is available with `command -v greprules`.
 2. Run `greprules doctor --format json`.
 3. If `opengrep.active.ok` is false, use `/greprules:configure` or ask one concise question about the OpenGrep runtime choice before scanning.
-4. If `lock.exists` is false and `registry.ok` is true, run `greprules fetch`.
-5. If OpenGrep is still not ready, stop and summarize `recommendedCommands`.
-6. Run `greprules scan-edited`.
-7. Read `.greprules/out/agent-result.json`.
-8. Summarize findings by rule id, severity, file, line, and message.
-9. Classify findings as true positive, false positive, or needs investigation. Do not edit code, add suppressions, upload rules, or create rule drafts unless the user explicitly asks.
+4. If `lock.exists` is false and `registry.ok` is true, run `greprules agent-state prepare-targets`, then run `greprules recommend --format json --agent --targets-from <targetsPath>` using the returned `targetsPath`.
+5. Inspect `detection`, `targets`, `availablePacks`, and `candidates`; choose explicit pack slugs that match the edited files. Do not invent pack slugs.
+6. Fetch the selected packs with repeated `greprules fetch --pack <slug>` arguments. If no available pack fits the edited files, report that pack selection needs user input instead of running a broad fetch.
+7. If OpenGrep is still not ready, stop and summarize `recommendedCommands`.
+8. Run `greprules scan-edited`.
+9. Read `.greprules/out/agent-result.json`.
+10. Summarize findings by rule id, severity, file, line, and message.
+11. Classify findings as true positive, false positive, or needs investigation. Do not edit code, add suppressions, upload rules, or create rule drafts unless the user explicitly asks.
 
 Fallbacks:
 

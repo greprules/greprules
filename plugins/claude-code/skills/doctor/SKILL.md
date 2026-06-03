@@ -19,6 +19,6 @@ Workflow:
 8. Run `greprules doctor --format json` again and summarize readiness.
 9. If the CLI wrapper reports that the real CLI is missing, tell the user to put `greprules` on `PATH`, set `GREPRULES_CLI_PATH`, or let the plugin bootstrap the release binary under the greprules user cache. `GREPRULES_PLUGIN_CACHE_DIR` can override that cache only for debugging.
 
-Missing `lock.exists` means rule packs have not been fetched yet. Do not describe this as incomplete setup when `registry.ok` and `opengrep.active.ok` are true; scan commands can fetch packs automatically before scanning.
+Missing `lock.exists` means rule packs have not been fetched yet. Do not describe this as incomplete setup when `registry.ok` and `opengrep.active.ok` are true; scan commands should select packs from target context before fetching.
 
 Do not run `greprules fetch` or `greprules scan` from this skill unless the user explicitly asks for that follow-up.

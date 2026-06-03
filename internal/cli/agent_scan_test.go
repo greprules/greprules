@@ -122,6 +122,67 @@ func TestRunAgentScanEditedJSONOutput(t *testing.T) {
 	}
 }
 
+func TestRunAgentScanEditedRequestsAgentPackSelection(t *testing.T) {
+	root, state := setupAgentPluginTestEnv(t)
+	writeFile(t, filepath.Join(root, "query.sql"), "select * from users\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/packs" {
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"packs":[]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	fakeOpenGrep := filepath.Join(root, "fake-opengrep")
+	writeFile(t, fakeOpenGrep, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'opengrep 9.8.7\n'
+  exit 0
+fi
+exit 0
+`)
+	if err := os.Chmod(fakeOpenGrep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Registry = server.URL
+	cfg.OpenGrep.Mode = "path"
+	cfg.OpenGrep.Managed = false
+	cfg.OpenGrep.Path = fakeOpenGrep
+	if err := config.SaveLocalConfig(root, cfg); err != nil {
+		t.Fatal(err)
+	}
+	markAgentDirty(t, root, state, "query.sql")
+
+	var stdout bytes.Buffer
+	withStdout(t, &stdout, func() {
+		if err := runAgentScan(t.Context(), []string{
+			"edited",
+			"--root", root,
+			"--state-dir", state,
+			"--automatic",
+			"--format", "json",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var outcome agentScanOutcome
+	if err := json.Unmarshal(stdout.Bytes(), &outcome); err != nil {
+		t.Fatalf("expected JSON outcome, got %q: %v", stdout.String(), err)
+	}
+	if outcome.Status != "needs_pack_selection" {
+		t.Fatalf("expected needs_pack_selection, got %#v", outcome)
+	}
+	for _, want := range []string{"greprules recommend", "--agent", "--targets-from", "Do not invent pack slugs"} {
+		if !strings.Contains(outcome.Message, want) {
+			t.Fatalf("message missing %q: %q", want, outcome.Message)
+		}
+	}
+	assertFileExists(t, filepath.Join(state, "dirty"))
+	assertFileExists(t, filepath.Join(state, "dirty-files"))
+}
+
 func TestRunScanEditedKeepsTrackedStateWhenReadinessFails(t *testing.T) {
 	root, state := setupAgentPluginTestEnv(t)
 	writeFile(t, filepath.Join(root, "app.mjs"), "console.log(1)\n")

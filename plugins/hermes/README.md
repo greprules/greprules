@@ -1,6 +1,6 @@
 # greprules Hermes Plugin
 
-Hermes plugin for greprules.io rule-pack scans. The plugin follows Hermes' `plugin.yaml` + `__init__.py` plugin layout and delegates scanning to the greprules Go CLI.
+Hermes plugin for greprules.io rule-pack scans. The plugin follows Hermes' `plugin.yaml` + `__init__.py` plugin layout and delegates deterministic fetch, scan, and state operations to the greprules Go CLI.
 
 ## Install
 
@@ -51,7 +51,7 @@ Aliases:
 ## Hooks
 
 - `post_tool_call` tracks files edited through Hermes file tools.
-- `pre_llm_call` scans tracked edited files before the next model turn and injects a compact result summary as context.
+- `pre_llm_call` scans tracked edited files before the next model turn and injects a compact result summary as context. If rule-pack selection is ambiguous, it returns instructions to inspect available packs and fetch explicit slugs before rerunning the scan.
 
 Environment controls:
 

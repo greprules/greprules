@@ -18,6 +18,7 @@ type Signal struct {
 
 type Result struct {
 	Root       string   `json:"root"`
+	Targets    []string `json:"targets,omitempty"`
 	Languages  []Signal `json:"languages"`
 	Frameworks []Signal `json:"frameworks"`
 	Warnings   []string `json:"warnings,omitempty"`
@@ -52,11 +53,7 @@ func Detect(root string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	acc := accumulator{
-		root:       root,
-		languages:  map[string]*Signal{},
-		frameworks: map[string]*Signal{},
-	}
+	acc := newAccumulator(root)
 	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			acc.warnings = append(acc.warnings, walkErr.Error())
@@ -81,11 +78,78 @@ func Detect(root string) (Result, error) {
 	return acc.result(), nil
 }
 
+func DetectTargets(root string, rawTargets []string) (Result, error) {
+	if len(rawTargets) == 0 {
+		return Detect(root)
+	}
+	root, err := FindRepoRoot(root)
+	if err != nil {
+		return Result{}, err
+	}
+	acc := accumulator{
+		root:       root,
+		targets:    []string{},
+		languages:  map[string]*Signal{},
+		frameworks: map[string]*Signal{},
+	}
+	seen := map[string]bool{}
+	for _, raw := range rawTargets {
+		target, rel, ok := normalizeTarget(root, raw)
+		if !ok {
+			acc.warnings = append(acc.warnings, "target is not available or outside root: "+raw)
+			continue
+		}
+		if seen[rel] {
+			continue
+		}
+		seen[rel] = true
+		acc.targets = append(acc.targets, rel)
+		acc.inspectContextManifests(target)
+		info, err := os.Stat(target)
+		if err != nil {
+			acc.warnings = append(acc.warnings, err.Error())
+			continue
+		}
+		if !info.IsDir() {
+			acc.inspectTargetFile(target, rel)
+			continue
+		}
+		_ = filepath.WalkDir(target, func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				acc.warnings = append(acc.warnings, walkErr.Error())
+				return nil
+			}
+			if path == target {
+				return nil
+			}
+			childRel, _ := filepath.Rel(root, path)
+			if entry.IsDir() {
+				if shouldSkipDir(entry.Name()) || strings.Count(childRel, string(os.PathSeparator))-strings.Count(rel, string(os.PathSeparator)) > 4 {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			acc.inspectTargetFile(path, childRel)
+			return nil
+		})
+	}
+	return acc.result(), nil
+}
+
 type accumulator struct {
 	root       string
+	targets    []string
 	languages  map[string]*Signal
 	frameworks map[string]*Signal
 	warnings   []string
+}
+
+func newAccumulator(root string) accumulator {
+	return accumulator{
+		root:       root,
+		languages:  map[string]*Signal{},
+		frameworks: map[string]*Signal{},
+	}
 }
 
 func (a *accumulator) inspectFile(path, rel string) {
@@ -126,13 +190,129 @@ func (a *accumulator) inspectFile(path, rel string) {
 	}
 	ext := strings.ToLower(filepath.Ext(name))
 	switch ext {
+	case ".js", ".jsx", ".mjs", ".cjs":
+		a.addLanguage("javascript", 0.68, rel+":extension"+ext)
+	case ".ts", ".tsx":
+		a.addLanguage("typescript", 0.72, rel+":extension"+ext)
+	case ".py":
+		a.addLanguage("python", 0.72, rel+":extension.py")
+	case ".go":
+		a.addLanguage("go", 0.74, rel+":extension.go")
+	case ".java", ".kt", ".kts", ".scala":
+		a.addLanguage("java", 0.7, rel+":extension"+ext)
+		a.addLanguage("jvm", 0.66, rel+":extension"+ext)
+	case ".php":
+		a.addLanguage("php", 0.72, rel+":extension.php")
+	case ".rb":
+		a.addLanguage("ruby", 0.72, rel+":extension.rb")
+	case ".rs":
+		a.addLanguage("rust", 0.72, rel+":extension.rs")
+	case ".c", ".h":
+		a.addLanguage("c", 0.68, rel+":extension"+ext)
+	case ".cc", ".cpp", ".cxx", ".hpp", ".hh":
+		a.addLanguage("cpp", 0.68, rel+":extension"+ext)
 	case ".csproj", ".sln":
 		a.addLanguage("csharp", 0.85, rel)
 		a.addLanguage("dotnet", 0.8, rel)
+	case ".cs":
+		a.addLanguage("csharp", 0.72, rel+":extension.cs")
 	case ".tf", ".yaml", ".yml", ".json":
 		if strings.Contains(rel, ".github/workflows/") || strings.Contains(rel, "k8s") || strings.Contains(rel, "kubernetes") {
 			a.addLanguage("config", 0.6, rel)
 		}
+	}
+}
+
+func (a *accumulator) inspectTargetFile(path, rel string) {
+	a.inspectFile(path, rel)
+	a.inspectSourceFrameworks(path, rel)
+}
+
+func (a *accumulator) inspectSourceFrameworks(path, rel string) {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".py", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".java", ".kt", ".kts", ".php", ".rb":
+	default:
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		a.warnings = append(a.warnings, err.Error())
+		return
+	}
+	if len(data) > 1024*1024 {
+		data = data[:1024*1024]
+	}
+	lower := strings.ToLower(string(data))
+	switch ext {
+	case ".py":
+		if strings.Contains(lower, "from fastapi") || strings.Contains(lower, "import fastapi") {
+			a.addFramework("fastapi", 0.82, rel+":import.fastapi")
+		}
+		if strings.Contains(lower, "from django") || strings.Contains(lower, "import django") {
+			a.addFramework("django", 0.82, rel+":import.django")
+		}
+		if strings.Contains(lower, "from flask") || strings.Contains(lower, "import flask") {
+			a.addFramework("flask", 0.82, rel+":import.flask")
+		}
+	case ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx":
+		if containsAny(lower, `"next`, "'next", "`next") {
+			a.addFramework("nextjs", 0.78, rel+":import.next")
+		}
+		if strings.Contains(lower, "react") {
+			a.addFramework("react", 0.72, rel+":import.react")
+		}
+		if strings.Contains(lower, "express") {
+			a.addFramework("express", 0.76, rel+":import.express")
+		}
+		if strings.Contains(lower, "@nestjs/") || strings.Contains(lower, "from '@nestjs") || strings.Contains(lower, `from "@nestjs`) {
+			a.addFramework("nestjs", 0.8, rel+":import.nestjs")
+		}
+	case ".java", ".kt", ".kts":
+		if strings.Contains(lower, "org.springframework") || strings.Contains(lower, "@springbootapplication") {
+			a.addFramework("spring", 0.82, rel+":spring")
+		}
+	case ".php":
+		if strings.Contains(lower, "illuminate\\") || strings.Contains(lower, "laravel") {
+			a.addFramework("laravel", 0.78, rel+":laravel")
+		}
+	case ".rb":
+		if strings.Contains(lower, "rails") || strings.Contains(lower, "applicationrecord") || strings.Contains(lower, "actioncontroller") {
+			a.addFramework("rails", 0.76, rel+":rails")
+		}
+	}
+}
+
+func (a *accumulator) inspectContextManifests(target string) {
+	info, err := os.Stat(target)
+	if err != nil {
+		return
+	}
+	dir := target
+	if !info.IsDir() {
+		dir = filepath.Dir(target)
+	}
+	root, _ := filepath.Abs(a.root)
+	dir, _ = filepath.Abs(dir)
+	for {
+		if rel, err := filepath.Rel(root, dir); err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
+			break
+		}
+		for _, name := range contextManifestNames() {
+			path := filepath.Join(dir, name)
+			if fileInfo, err := os.Stat(path); err == nil && !fileInfo.IsDir() {
+				rel, _ := filepath.Rel(a.root, path)
+				a.inspectFile(path, rel)
+			}
+		}
+		if dir == root {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
 	}
 }
 
@@ -220,12 +400,73 @@ func addSignal(target map[string]*Signal, name string, confidence float64, sourc
 }
 
 func (a *accumulator) result() Result {
+	sort.Strings(a.targets)
 	return Result{
 		Root:       a.root,
+		Targets:    a.targets,
 		Languages:  sortedSignals(a.languages),
 		Frameworks: sortedSignals(a.frameworks),
 		Warnings:   a.warnings,
 	}
+}
+
+func normalizeTarget(root string, raw string) (string, string, bool) {
+	target := strings.TrimSpace(raw)
+	if target == "" {
+		return "", "", false
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(root, target)
+	}
+	target, err := filepath.Abs(target)
+	if err != nil {
+		return "", "", false
+	}
+	if resolved, err := filepath.EvalSymlinks(target); err == nil {
+		target = resolved
+	}
+	rootAbs, _ := filepath.Abs(root)
+	if resolvedRoot, err := filepath.EvalSymlinks(rootAbs); err == nil {
+		rootAbs = resolvedRoot
+	}
+	rel, err := filepath.Rel(rootAbs, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
+		return "", "", false
+	}
+	if _, err := os.Stat(target); err != nil {
+		return "", "", false
+	}
+	return target, filepath.Clean(rel), true
+}
+
+func contextManifestNames() []string {
+	return []string{
+		"package.json",
+		"tsconfig.json",
+		"go.mod",
+		"pyproject.toml",
+		"requirements.txt",
+		"setup.py",
+		"Pipfile",
+		"pom.xml",
+		"build.gradle",
+		"build.gradle.kts",
+		"composer.json",
+		"Gemfile",
+		"Cargo.toml",
+		"docker-compose.yml",
+		"docker-compose.yaml",
+		"kustomization.yaml",
+	}
+}
+
+func containsAny(value string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(value, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func sortedSignals(values map[string]*Signal) []Signal {
