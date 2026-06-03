@@ -36,6 +36,8 @@ archives:
           - zip
     files:
       - README.md
+      - plugin.yaml
+      - __init__.py
       - .claude-plugin/**
       - plugins/**
 

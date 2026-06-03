@@ -4,15 +4,13 @@ Hermes plugin for greprules.io rule-pack scans. The plugin follows Hermes' `plug
 
 ## Install
 
-Copy or install this directory as a Hermes plugin, then enable it:
+Install the plugin from the greprules repository:
 
 ```bash
-mkdir -p ~/.hermes/plugins
-cp -R plugins/hermes ~/.hermes/plugins/greprules
-hermes plugins enable greprules
+hermes plugins install greprules/greprules --enable
 ```
 
-Hermes general plugins are opt-in. Project-local plugins under `.hermes/plugins/` require `HERMES_ENABLE_PROJECT_PLUGINS=true`.
+The repository root contains a small Hermes shim so `hermes plugins install` can clone the monorepo directly. The implementation in this directory remains the source of the Hermes adapter. Hermes general plugins are opt-in. Project-local plugins under `.hermes/plugins/` require `HERMES_ENABLE_PROJECT_PLUGINS=true`.
 
 ## CLI Runtime
 

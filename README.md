@@ -87,11 +87,13 @@ export GREPRULES_TRACK_EDITED_FILES=false
 
 ## Hermes Plugin
 
-The Hermes plugin lives in `plugins/hermes` and follows Hermes' standard `plugin.yaml` plus `__init__.py` layout. Install or copy it into `~/.hermes/plugins/greprules`, then enable it:
+Install the Hermes plugin from this repository:
 
 ```bash
-hermes plugins enable greprules
+hermes plugins install greprules/greprules --enable
 ```
+
+Hermes installs Git repositories as plugin roots, so greprules includes a small root-level Hermes shim that delegates to the implementation in `plugins/hermes`.
 
 Hermes slash commands:
 
@@ -263,7 +265,7 @@ export GREPRULES_CLI_PATH="$PWD/greprules"
 To override the plugin bootstrap release during testing:
 
 ```bash
-export GREPRULES_VERSION=v0.1.5
+export GREPRULES_VERSION=v0.1.6
 export GREPRULES_PLUGIN_CACHE_DIR=/tmp/greprules-plugin-cache
 ```
 
