@@ -735,7 +735,7 @@ func summarizeAgentResult(path string) string {
 		lines = append(lines, "No OpenGrep findings were reported for the current automatic scan.")
 	} else {
 		lines = append(lines, fmt.Sprintf(
-			"OpenGrep reported %d finding(s) on files you just edited. Review .greprules/out/agent-result.json: classify each as true/false positive, explain reasoning, and fix or justify before finishing.",
+			"OpenGrep reported %d finding(s) on files you edited. Review .greprules/out/agent-result.json and any relevant project context needed to classify each as true positive, false positive, or needs investigation. Report findings and reasoning only. Do not edit code, add nosemgrep/suppressions, chase zero findings, or rerun greprules unless the user explicitly asks.",
 			len(result.Findings),
 		))
 		for _, finding := range result.Findings[:minInt(len(result.Findings), 10)] {

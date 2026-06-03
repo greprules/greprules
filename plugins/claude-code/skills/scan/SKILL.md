@@ -4,6 +4,8 @@ description: Fetch greprules packs, run OpenGrep scan, and summarize agent-reada
 
 Use this skill when the user asks to scan the current repository with greprules.
 
+When handling an automatic Stop hook result, read `.greprules/out/agent-result.json` and any relevant project context needed to classify each finding, then report reasoning only. Do not edit code, add `nosemgrep` or other suppressions, chase zero findings, or rerun greprules unless the user explicitly asks.
+
 Primary workflow:
 
 1. Verify the CLI is available with `command -v greprules`.
@@ -19,7 +21,7 @@ Primary workflow:
 8. Run `greprules scan --changed` by default, or `greprules scan --target <path>` when the user names specific files.
 9. Read `.greprules/out/agent-result.json`.
 10. Summarize findings by rule id, severity, file, line, and message.
-11. Propose code fixes for true-positive-looking findings, but do not upload rules or create rule drafts.
+11. Report true positives, false positives, and needs-investigation findings. Do not edit code, add suppressions, chase zero findings, rerun scans, upload rules, or create rule drafts unless the user explicitly asks.
 
 OpenGrep default rules are included by default. If the user asks to scan only greprules.io rule packs, run `greprules config set opengrep.includeDefaultRules false --global` before scanning and verify with `greprules config inspect --format json`.
 

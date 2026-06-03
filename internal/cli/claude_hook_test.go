@@ -103,8 +103,18 @@ printf '{"results":[{"check_id":"greprules.example","path":"app.mjs","start":{"l
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("expected JSON hook output, got %q: %v", stdout.String(), err)
 	}
-	if payload["decision"] != "block" || !strings.Contains(payload["reason"].(string), "OpenGrep reported 1 finding") {
+	reason, _ := payload["reason"].(string)
+	if payload["decision"] != "block" || !strings.Contains(reason, "OpenGrep reported 1 finding") {
 		t.Fatalf("unexpected hook output: %#v", payload)
+	}
+	for _, want := range []string{
+		"any relevant project context needed to classify each as true positive, false positive, or needs investigation",
+		"Report findings and reasoning only",
+		"Do not edit code, add nosemgrep/suppressions, chase zero findings, or rerun greprules unless the user explicitly asks",
+	} {
+		if !strings.Contains(reason, want) {
+			t.Fatalf("hook reason missing %q: %q", want, reason)
+		}
 	}
 	assertNoFile(t, filepath.Join(state, "dirty"))
 	assertNoFile(t, filepath.Join(state, "dirty-files"))
