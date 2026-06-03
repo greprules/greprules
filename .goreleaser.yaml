@@ -36,6 +36,8 @@ archives:
           - zip
     files:
       - README.md
+      - .claude-plugin/**
+      - plugins/**
 
 checksum:
   name_template: checksums.txt
