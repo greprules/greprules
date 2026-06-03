@@ -20,7 +20,7 @@ Rules:
 Common commands:
 
 ```bash
-greprules config set registry http://localhost:8787 --global
+greprules config set registry https://api.greprules.io --global
 greprules config set opengrep.mode system --global
 greprules config set opengrep.mode managed --global
 greprules config set opengrep.mode path --global
@@ -28,6 +28,12 @@ greprules config set opengrep.path /absolute/path/to/opengrep --global
 greprules config set opengrep.includeDefaultRules false --global
 greprules config inspect --format json
 greprules doctor --format json
+```
+
+For local worker development only, override the registry explicitly:
+
+```bash
+GREPRULES_REGISTRY=http://127.0.0.1:8790 greprules doctor --format json
 ```
 
 Runtime selection workflow:

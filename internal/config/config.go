@@ -17,7 +17,7 @@ const (
 	UserConfigSchemaVersion  = "greprules.user.v1"
 	LocalConfigSchemaVersion = "greprules.local.v1"
 	LockSchemaVersion        = "greprules.lock.v1"
-	DefaultRegistry          = "https://greprules.io"
+	DefaultRegistry          = "https://api.greprules.io"
 )
 
 type Config struct {

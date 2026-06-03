@@ -7,6 +7,13 @@ import (
 	"testing"
 )
 
+func TestNewUsesProductionAPIRegistryByDefault(t *testing.T) {
+	client := New("")
+	if client.BaseURL != "https://api.greprules.io" {
+		t.Fatalf("unexpected default registry URL: %q", client.BaseURL)
+	}
+}
+
 func TestClientFetchesPacksManifestAndTarball(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

@@ -71,7 +71,7 @@ type ManifestRule struct {
 
 func New(baseURL string) Client {
 	if baseURL == "" {
-		baseURL = "https://greprules.io"
+		baseURL = "https://api.greprules.io"
 	}
 	return Client{
 		BaseURL: strings.TrimRight(baseURL, "/"),

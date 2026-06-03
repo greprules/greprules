@@ -103,7 +103,7 @@ User/global config is JSON so plugin UIs can write it directly:
 ```json
 {
   "schemaVersion": "greprules.user.v1",
-  "registry": "http://localhost:8787",
+  "registry": "https://api.greprules.io",
   "opengrep": {
     "mode": "system",
     "path": "/Users/l0ch/.local/bin/opengrep",
@@ -135,12 +135,18 @@ For safety, `opengrep.path` from shared `.greprules/config.yaml` is ignored. Put
 Recommended plugin flow:
 
 ```bash
-greprules config set registry http://localhost:8787 --global
+greprules config set registry https://api.greprules.io --global
 greprules config set opengrep.mode system --global
 greprules config set opengrep.includeDefaultRules true --global
 greprules doctor --format json
 greprules fetch
 greprules scan --changed
+```
+
+For local worker development, override the registry explicitly:
+
+```bash
+GREPRULES_REGISTRY=http://127.0.0.1:8790 greprules doctor --format json
 ```
 
 ## Claude Code Plugin
@@ -177,7 +183,7 @@ The wrapper resolves the real CLI in this order:
 ```text
 GREPRULES_CLI_PATH
 system PATH, excluding the plugin wrapper itself
-GitHub Release bootstrap into <user-cache-dir>/greprules/claude-plugin/greprules/v0.1.1/greprules
+GitHub Release bootstrap into <user-cache-dir>/greprules/claude-plugin/greprules/v0.1.2/greprules
 ```
 
 OpenGrep runtime configuration lives in greprules config files, not Claude Code plugin settings. Use `greprules config inspect --format json` to inspect the effective configuration.
@@ -190,10 +196,10 @@ mkdir -p ~/.local/bin
 cp ./greprules ~/.local/bin/greprules
 ```
 
-After `v0.1.1` is published, the plugin can bootstrap the matching native binary from GitHub Releases and verify it against `checksums.txt`. Override the release version only for testing:
+After `v0.1.2` is published, the plugin can bootstrap the matching native binary from GitHub Releases and verify it against `checksums.txt`. Override the release version only for testing:
 
 ```bash
-export GREPRULES_VERSION=v0.1.1
+export GREPRULES_VERSION=v0.1.2
 export GREPRULES_PLUGIN_CACHE_DIR=/tmp/greprules-plugin-cache
 ```
 

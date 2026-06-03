@@ -429,7 +429,7 @@ func TestConfigSetGlobalAndInspect(t *testing.T) {
 	if err := runConfigSet([]string{"--root", root, "--global", "opengrep.mode", "system"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runConfigSet([]string{"--root", root, "registry", "http://localhost:8787", "--global"}); err != nil {
+	if err := runConfigSet([]string{"--root", root, "registry", "http://127.0.0.1:8790", "--global"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runConfigSet([]string{"--root", root, "opengrep.includeDefaultRules", "false", "--global"}); err != nil {
@@ -440,7 +440,7 @@ func TestConfigSetGlobalAndInspect(t *testing.T) {
 		t.Fatal(err)
 	}
 	if resolution.Config.OpenGrep.Mode != "system" ||
-		resolution.Config.Registry != "http://localhost:8787" ||
+		resolution.Config.Registry != "http://127.0.0.1:8790" ||
 		resolution.Config.OpenGrep.IncludeDefaultRules {
 		t.Fatalf("unexpected effective config: %#v", resolution.Config)
 	}
