@@ -1,91 +1,158 @@
 # greprules
 
-`greprules` is a Go CLI for running greprules.io rule packs locally with a managed OpenGrep runtime.
+Agent plugin for fetching trusted SAST rule packs from greprules.io and scanning local code changes with OpenGrep.
 
-The MVP scope is intentionally narrow:
+greprules is designed for local coding agents first. The Claude Code plugin gives Claude slash commands for checking setup, configuring OpenGrep, fetching rule packs, and scanning the files it edits. The Go CLI is the local runtime behind those commands.
 
-- detect repository languages and frameworks
-- create `.greprules/config.yaml`
-- recommend and fetch greprules.io packs
-- pin pack artifacts in `.greprules/lock.json`
-- install a managed OpenGrep binary
-- run changed-file, explicit-target, or full scans
-- write OpenGrep JSON, SARIF, and agent-readable JSON output
+## Quick Start
 
-Out of scope for this CLI MVP:
+Run these inside Claude Code:
 
-- rule draft creation
-- upload/auth/moderation flows
-- Autoproof SARIF ingest
-- CI SaaS integration
-- AI true/false-positive decisions or automatic patches
+```text
+/plugin marketplace add greprules/greprules
+/plugin install greprules@greprules
+/reload-plugins
 
-## Commands
+/greprules:doctor
+/greprules:configure
+/greprules:scan
+```
+
+`/greprules:doctor` is the best first command. It checks the registry, OpenGrep runtime, local lockfile, and any setup steps Claude should handle before scanning.
+
+## What It Does
+
+- Fetches reusable SAST rule packs from greprules.io.
+- Configures OpenGrep for local scans.
+- Tracks files edited by Claude Code.
+- Scans changed files or explicit targets before the agent finishes.
+- Writes agent-readable results so Claude can review findings and suggest fixes.
+- Keeps source code local; the plugin fetches rules and runs OpenGrep on your machine.
+
+## Claude Code Slash Commands
+
+All user-facing plugin commands are prefixed with `/greprules:`.
+
+| Command | Use when |
+| --- | --- |
+| `/greprules:doctor` | You want to check whether greprules is ready in the current repo. |
+| `/greprules:configure` | OpenGrep needs to be installed, selected, or switched between managed/system/path modes. |
+| `/greprules:scan` | You want Claude to fetch rule packs if needed and scan changed files or named targets. |
+
+Common examples:
+
+```text
+/greprules:doctor
+/greprules:configure
+/greprules:scan
+/greprules:scan src/auth
+```
+
+## Typical Workflow
+
+1. Open a repository in Claude Code.
+2. Run `/greprules:doctor`.
+3. If setup is needed, run `/greprules:configure`.
+4. Let Claude edit code as usual.
+5. Run `/greprules:scan`, or let the plugin's Stop hook scan the files Claude edited.
+6. Claude reads the scan result, separates likely true positives from noise, and proposes fixes.
+
+The plugin does not require install-time configuration. Runtime choices are stored in greprules config so Claude Code, terminals, and CI can share the same behavior.
+
+## Automatic Scan Hooks
+
+The Claude Code plugin includes lightweight hooks for agent editing sessions:
+
+- `SessionStart` checks readiness and reports setup gaps.
+- `PostToolUse` records files Claude edited with `Edit`, `MultiEdit`, `Write`, or `NotebookEdit`.
+- `Stop` scans the edited files once, then asks Claude to review the result before finishing.
+
+Set this before starting Claude Code to disable automatic scans for a session:
+
+```bash
+export GREPRULES_AUTO_SCAN=false
+```
+
+## OpenGrep Runtime
+
+OpenGrep does the actual scanning. greprules keeps runtime selection explicit so scans are reproducible and easy to debug.
+
+| Mode | Use when |
+| --- | --- |
+| `managed` | You want greprules to install and use a managed OpenGrep binary. This is the default. |
+| `system` | You already have `opengrep` on `PATH` and want to use it. |
+| `path` | You want to point greprules at a specific OpenGrep executable. |
+
+Use `/greprules:configure` to choose a runtime from Claude Code. From a shell, the same settings are available through:
+
+```bash
+greprules config set opengrep.mode system --global
+greprules config set opengrep.mode managed --global
+greprules config set opengrep.mode path --global
+greprules config set opengrep.path /absolute/path/to/opengrep --global
+```
+
+By default, greprules scans fetched greprules.io packs together with OpenGrep's default auto-selected rules. To scan only greprules.io packs:
+
+```bash
+greprules config set opengrep.includeDefaultRules false --global
+```
+
+## Results and Local Files
+
+The important files are:
+
+```text
+.greprules/config.yaml
+.greprules/lock.json
+.greprules/out/agent-result.json
+.greprules/out/scan.sarif
+```
+
+Claude reads `.greprules/out/agent-result.json`. It contains the scan summary, findings, warnings, selected OpenGrep runtime, and rule pack metadata. `.greprules/lock.json` pins fetched pack artifacts and records the selected scan runtime.
+
+Generated local paths are ignored automatically in git repositories:
+
+```text
+.greprules/cache/
+.greprules/out/
+.greprules/plugin-data/
+.greprules/config.local.json
+```
+
+Shared files such as `.greprules/config.yaml` and `.greprules/lock.json` are not ignored automatically.
+
+## Standalone CLI
+
+The CLI is useful when you want the same scan behavior outside Claude Code.
+
+```bash
+greprules doctor
+greprules init --mode auto
+greprules fetch
+greprules scan --changed
+```
+
+More commands:
 
 ```bash
 greprules detect --format json
-greprules init --mode auto
 greprules config inspect --format json
-greprules config set opengrep.mode system --global
-greprules config set opengrep.includeDefaultRules false --global
 greprules recommend
-greprules fetch
 greprules setup-opengrep
-greprules scan --changed
 greprules scan --target path/to/file
 greprules scan --targets-from .greprules/out/targets.txt
 greprules scan --full
-greprules doctor --format json
 greprules cleanup --plugin-cache --dry-run
 ```
 
-## OpenGrep Runtime Policy
+## Configuration Reference
 
-`greprules` defaults to a managed OpenGrep runtime for reproducible community scans. A system-wide OpenGrep install is supported, but it must be selected explicitly.
-
-Managed runtime:
-
-```bash
-greprules init --engine managed
-greprules setup-opengrep --version latest
-greprules scan --full
-```
-
-System `PATH` runtime:
-
-```bash
-greprules config set opengrep.mode system --global
-greprules scan --engine system --full
-greprules doctor --engine system --debug
-```
-
-Explicit binary path:
-
-```bash
-greprules config set opengrep.mode path --global
-greprules config set opengrep.path /opt/homebrew/bin/opengrep --global
-greprules scan --engine path --opengrep-path /opt/homebrew/bin/opengrep --full
-```
-
-The selected engine is recorded in `.greprules/lock.json` and `.greprules/out/agent-result.json` with its mode, source, path, version, and SHA-256.
-
-By default, greprules runs fetched greprules.io rule packs together with OpenGrep's default auto-selected rules by passing both configs to OpenGrep:
+The production registry is:
 
 ```text
-opengrep scan --config <greprules-pack-a-rules> --config <greprules-pack-b-rules> --config auto ...
+https://api.greprules.io
 ```
-
-Disable OpenGrep default rules when you want greprules.io packs only:
-
-```bash
-greprules config set opengrep.includeDefaultRules false --global
-```
-
-If OpenGrep writes valid JSON findings but exits non-zero because of rule parse errors or partial scan diagnostics, greprules keeps the findings and records those diagnostics as warnings in `.greprules/out/agent-result.json`.
-
-## Agent-Friendly Configuration
-
-Agent plugins should write structured config once, then run the CLI without carrying config details in prompts.
 
 Configuration is merged in this order:
 
@@ -98,7 +165,7 @@ environment variables
 defaults
 ```
 
-User/global config is JSON so plugin UIs can write it directly:
+User/global config is JSON:
 
 ```json
 {
@@ -113,7 +180,7 @@ User/global config is JSON so plugin UIs can write it directly:
 }
 ```
 
-Repo-shared config remains YAML:
+Repo-shared config is YAML:
 
 ```yaml
 schemaVersion: greprules.config.v1
@@ -124,61 +191,17 @@ opengrep:
   mode: managed
 ```
 
-Machine-specific repo config is JSON and should not be committed:
-
-```text
-.greprules/config.local.json
-```
-
 For safety, `opengrep.path` from shared `.greprules/config.yaml` is ignored. Put executable paths in user/global config, repo-local config, environment variables, or CLI flags.
 
-Recommended plugin flow:
+For local worker development only:
 
 ```bash
-greprules config set registry https://api.greprules.io --global
-greprules config set opengrep.mode system --global
-greprules config set opengrep.includeDefaultRules true --global
-greprules doctor --format json
-greprules fetch
-greprules scan --changed
+GREPRULES_REGISTRY=http://127.0.0.1:8790 greprules doctor
 ```
 
-For local worker development, override the registry explicitly:
+## Plugin Runtime
 
-```bash
-GREPRULES_REGISTRY=http://127.0.0.1:8790 greprules doctor --format json
-```
-
-## Claude Code Plugin
-
-The repository includes a Claude Code marketplace manifest at the repo root for installing the greprules plugin from GitHub.
-
-```bash
-claude plugin validate /Users/l0ch/provally/projects/greprules
-claude plugin validate /Users/l0ch/provally/projects/greprules/plugins/claude-code
-claude plugin marketplace add greprules/greprules --scope user
-claude plugin install greprules@greprules --scope user
-```
-
-Then reload Claude Code and use:
-
-```text
-/greprules:doctor
-/greprules:configure
-/greprules:scan
-```
-
-The plugin does not require install-time configuration. When `/greprules:doctor`, `/greprules:configure`, or `/greprules:scan` finds that OpenGrep is not ready, Claude first checks for a system `opengrep` on `PATH`, then asks whether to use system OpenGrep, install managed OpenGrep, or configure a manual executable path. The selected runtime is written with `greprules config set ... --global`, so terminals and CI can use the same setting.
-
-The plugin includes a `bin/greprules` wrapper and lifecycle hooks tuned for agent editing:
-
-- `SessionStart`: run `doctor` and report setup gaps. It never installs OpenGrep or scans.
-- `PostToolUse` for `Edit`, `MultiEdit`, `Write`, and `NotebookEdit`: capture file paths from Claude's actual edit event, keep only code and security-relevant config candidates, and mark the workspace dirty. It never scans.
-- `Stop`: if the workspace is dirty, scan the files Claude actually edited, then block the stop once with a compact verification prompt so Claude reviews the scan result before finishing. Automatic scan state is one-shot; terminal skip and failure paths clear the pending marker so stale edits do not trigger scans in later unrelated turns. This does not require a git repository.
-
-Claude Code hooks call `bin/greprules claude-hook ...`; the wrapper only resolves or downloads the real CLI, while hook JSON parsing, file filtering, scan lifecycle, and StopBlock output are implemented in the Go CLI.
-
-The wrapper resolves the real CLI in this order:
+The Claude Code plugin ships a `bin/greprules` wrapper. It resolves the real CLI in this order:
 
 ```text
 GREPRULES_CLI_PATH
@@ -186,83 +209,35 @@ system PATH, excluding the plugin wrapper itself
 GitHub Release bootstrap into <user-cache-dir>/greprules/claude-plugin/greprules/v0.1.2/greprules
 ```
 
-OpenGrep runtime configuration lives in greprules config files, not Claude Code plugin settings. Use `greprules config inspect --format json` to inspect the effective configuration.
+For plugin-specific details, see [`plugins/claude-code/README.md`](plugins/claude-code/README.md).
 
-For local development before a release exists, build and copy the CLI onto `PATH`:
+## Development
+
+```bash
+make test vet build
+claude plugin validate --strict /path/to/greprules
+claude plugin validate --strict /path/to/greprules/plugins/claude-code
+```
+
+To test a local CLI build before a release:
 
 ```bash
 go build -o greprules ./cmd/greprules
-mkdir -p ~/.local/bin
-cp ./greprules ~/.local/bin/greprules
+export GREPRULES_CLI_PATH="$PWD/greprules"
 ```
 
-After `v0.1.2` is published, the plugin can bootstrap the matching native binary from GitHub Releases and verify it against `checksums.txt`. Override the release version only for testing:
+To override the plugin bootstrap release during testing:
 
 ```bash
 export GREPRULES_VERSION=v0.1.2
 export GREPRULES_PLUGIN_CACHE_DIR=/tmp/greprules-plugin-cache
 ```
 
-To disable the automatic hook in a Claude Code session:
-
-```bash
-export GREPRULES_AUTO_SCAN=false
-```
-
-Automatic scan guardrails:
-
-```bash
-export GREPRULES_AUTO_SCAN_MIN_INTERVAL_SECONDS=45
-export GREPRULES_AUTO_SCAN_MAX_CHANGED_FILES=100
-```
-
-## Local Files
-
-```text
-.greprules/config.yaml
-.greprules/config.local.json
-.greprules/lock.json
-.greprules/cache/packs/...
-.greprules/out/scan.json
-.greprules/out/scan.sarif
-.greprules/out/agent-result.json
-```
-
-When greprules runs in a git repository, it automatically adds generated/local paths to the project `.gitignore`:
-
-```text
-.greprules/cache/
-.greprules/out/
-.greprules/plugin-data/
-.greprules/config.local.json
-```
-
-Shared project files such as `.greprules/config.yaml` and `.greprules/lock.json` are not ignored automatically.
-
-Managed OpenGrep binaries are stored under the OS user cache directory:
-
-```text
-<user-cache-dir>/greprules/opengrep/<version>/opengrep
-```
-
-The Claude Code wrapper bootstrap cache is stored separately:
-
-```text
-<user-cache-dir>/greprules/claude-plugin/greprules/<version>/greprules
-```
-
-Cleanup is explicit. User config and caches are intentionally left in place on plugin uninstall, but can be removed when needed:
+Cleanup is explicit:
 
 ```bash
 greprules cleanup --config --plugin-cache --dry-run
 greprules cleanup --config --plugin-cache
 greprules cleanup --purge
 greprules cleanup --repo
-```
-
-## Development
-
-```bash
-go test ./...
-go build -o greprules ./cmd/greprules
 ```
