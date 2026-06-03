@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/greprules/greprules/internal/config"
+	"github.com/greprules/greprules/internal/doctor"
 )
 
 func TestRunFetchWritesLockAndCache(t *testing.T) {
@@ -449,46 +450,56 @@ func TestConfigSetGlobalAndInspect(t *testing.T) {
 	}
 }
 
-func TestDoctorRecommendationsPreferSystemWhenManagedIsMissing(t *testing.T) {
+func TestDoctorMissingLockIsNotSetupFailureWhenScanCanFetch(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake runtime is unix-only")
+	}
+	root := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/packs" {
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"packs":[]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	fakeOpenGrep := filepath.Join(root, "fake-opengrep")
+	writeFile(t, fakeOpenGrep, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'opengrep 9.8.7\n'
+  exit 0
+fi
+printf '{"results":[]}\n'
+`)
+	if err := os.Chmod(fakeOpenGrep, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	cfg := config.DefaultConfig()
-	cfg.OpenGrep.Mode = "managed"
-	cfg.OpenGrep.Managed = true
-
-	report := doctorReport{
-		OpenGrep: opengrepStatus{
-			Managed: runtimeCheck{OK: false, Error: "managed OpenGrep runtime is not installed"},
-			System:  runtimeCheck{OK: true},
-			Active:  runtimeCheck{OK: false, Error: "managed OpenGrep runtime is not installed"},
-		},
+	cfg.Registry = server.URL
+	cfg.OpenGrep.Mode = "path"
+	cfg.OpenGrep.Managed = false
+	cfg.OpenGrep.Path = fakeOpenGrep
+	if err := config.SaveLocalConfig(root, cfg); err != nil {
+		t.Fatal(err)
 	}
 
-	addOpenGrepRecommendations(&report, cfg)
-
-	if !containsString(report.RecommendedCommands, "greprules config set opengrep.mode system --global") {
-		t.Fatalf("expected system config recommendation, got %#v", report.RecommendedCommands)
+	report, err := doctor.Build(t.Context(), root, doctor.Options{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if containsString(report.RecommendedCommands, "greprules setup-opengrep") {
-		t.Fatalf("expected system recommendation to take precedence over setup, got %#v", report.RecommendedCommands)
+	if report.Status != "ok" {
+		t.Fatalf("expected missing lock to remain ok when registry/runtime are ready, got %q", report.Status)
 	}
-}
-
-func TestDoctorRecommendationsUseManagedSetupWhenNoRuntimeIsReady(t *testing.T) {
-	cfg := config.DefaultConfig()
-	cfg.OpenGrep.Mode = "managed"
-	cfg.OpenGrep.Managed = true
-
-	report := doctorReport{
-		OpenGrep: opengrepStatus{
-			Managed: runtimeCheck{OK: false, Error: "managed OpenGrep runtime is not installed"},
-			System:  runtimeCheck{OK: false, Error: "system opengrep not found"},
-			Active:  runtimeCheck{OK: false, Error: "managed OpenGrep runtime is not installed"},
-		},
+	if report.Lock.Exists {
+		t.Fatal("expected missing lock")
 	}
-
-	addOpenGrepRecommendations(&report, cfg)
-
-	if !containsString(report.RecommendedCommands, "greprules setup-opengrep") {
-		t.Fatalf("expected setup recommendation, got %#v", report.RecommendedCommands)
+	if !strings.Contains(report.Lock.Message, "not fetched yet") {
+		t.Fatalf("expected informational lock message, got %#v", report.Lock)
+	}
+	if containsString(report.RecommendedCommands, "greprules fetch") {
+		t.Fatalf("expected fetch not to be setup recommendation, got %#v", report.RecommendedCommands)
 	}
 }
 

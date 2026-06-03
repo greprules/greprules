@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,15 +15,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/greprules/greprules/internal/agentstate"
 	"github.com/greprules/greprules/internal/archive"
 	"github.com/greprules/greprules/internal/config"
 	"github.com/greprules/greprules/internal/detect"
-	"github.com/greprules/greprules/internal/gitutil"
+	"github.com/greprules/greprules/internal/doctor"
 	"github.com/greprules/greprules/internal/hash"
 	"github.com/greprules/greprules/internal/opengrep"
-	"github.com/greprules/greprules/internal/output"
+	"github.com/greprules/greprules/internal/projectpath"
 	"github.com/greprules/greprules/internal/recommend"
 	"github.com/greprules/greprules/internal/registry"
+	"github.com/greprules/greprules/internal/runtimeconfig"
+	"github.com/greprules/greprules/internal/scanservice"
 	"gopkg.in/yaml.v3"
 )
 
@@ -70,10 +72,14 @@ func Execute(args []string, version string) int {
 		err = runSetupOpenGrep(ctx, args[1:])
 	case "scan":
 		err = runScan(ctx, args[1:])
+	case "scan-edited":
+		err = runScanEdited(ctx, args[1:])
 	case "doctor":
 		err = runDoctor(ctx, args[1:])
-	case "claude-hook":
-		err = runClaudeHook(ctx, args[1:])
+	case "agent-state":
+		err = runAgentState(args[1:])
+	case "agent-scan":
+		err = runAgentScan(ctx, args[1:])
 	case "cleanup", "uninstall":
 		err = runCleanup(args[1:])
 	default:
@@ -98,8 +104,8 @@ Usage:
   greprules fetch [--pack PACK]
   greprules setup-opengrep [--version latest]
   greprules scan [--changed|--full|--target PATH|--targets-from FILE] [--engine managed|system|path]
+  greprules scan-edited [--engine managed|system|path]
   greprules doctor [--debug] [--engine managed|system|path]
-  greprules claude-hook mark-dirty|scan-if-dirty|doctor
   greprules cleanup [--config|--cache|--opengrep|--plugin-cache|--repo|--all] [--dry-run]`)
 }
 
@@ -381,7 +387,7 @@ func runFetchWithOptions(ctx context.Context, args []string, options fetchComman
 	if err := ensureGreprulesGitignore(root); err != nil {
 		return err
 	}
-	cfg, err := loadOrDefaultConfig(root)
+	cfg, err := runtimeconfig.LoadOrDefaultConfig(root)
 	if err != nil {
 		return err
 	}
@@ -425,8 +431,8 @@ func runFetchWithOptions(ctx context.Context, args []string, options fetchComman
 		Packs:         lockedPacks,
 		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
 	}
-	if runtimeInfo, err := runtimeFromConfigOrLock(config.Lock{}, cfg, "", "", ""); err == nil {
-		lock.Engine = lockedEngineFromRuntime(runtimeInfo)
+	if runtimeInfo, err := runtimeconfig.FromConfigOrLock(config.Lock{}, cfg, "", "", ""); err == nil {
+		lock.Engine = runtimeconfig.LockedEngineFromRuntime(runtimeInfo)
 	}
 	return config.SaveLock(root, lock)
 }
@@ -442,7 +448,7 @@ func fetchPack(ctx context.Context, root string, cfg config.Config, client regis
 	}
 	tarballSHA := hash.SHA256Bytes(tarballBytes)
 	manifestSHA := hash.SHA256Bytes(manifestBytes)
-	cacheRoot := absFromRoot(root, cfg.CacheDir)
+	cacheRoot := projectpath.AbsFromRoot(root, cfg.CacheDir)
 	packRoot := filepath.Join(cacheRoot, "packs", packID, tarballSHA)
 	if err := os.RemoveAll(packRoot); err != nil {
 		return config.LockedPack{}, err
@@ -478,9 +484,9 @@ func fetchPack(ctx context.Context, root string, cfg config.Config, client regis
 		Source:         cfg.Registry,
 		SHA256:         tarballSHA,
 		ManifestSHA256: manifestSHA,
-		ManifestPath:   relToRoot(root, manifestPath),
-		TarballPath:    relToRoot(root, tarballPath),
-		RulePath:       relToRoot(root, filepath.Join(extractPath, "rules")),
+		ManifestPath:   projectpath.RelToRoot(root, manifestPath),
+		TarballPath:    projectpath.RelToRoot(root, tarballPath),
+		RulePath:       projectpath.RelToRoot(root, filepath.Join(extractPath, "rules")),
 		TotalRules:     manifest.TotalRules,
 		Languages:      manifest.Languages,
 		DownloadedAt:   time.Now().UTC().Format(time.RFC3339),
@@ -531,6 +537,54 @@ func runScan(ctx context.Context, args []string) error {
 	return runScanWithOptions(ctx, args, scanCommandOptions{stdout: os.Stdout, stderr: os.Stderr})
 }
 
+func runScanEdited(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("scan-edited", flag.ContinueOnError)
+	rootFlag := fs.String("root", ".", "repo root or child path")
+	stateDir := fs.String("state-dir", "", "agent state directory")
+	sarif := fs.Bool("sarif", true, "write SARIF output")
+	engineMode := fs.String("engine", "", "OpenGrep engine mode override: managed, system, or path")
+	opengrepPath := fs.String("opengrep-path", "", "OpenGrep binary path override")
+	opengrepVersion := fs.String("opengrep-version", "", "managed OpenGrep version override")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	root, err := detect.FindRepoRoot(*rootFlag)
+	if err != nil {
+		return err
+	}
+	state, err := scanEditedState(root, *stateDir)
+	if err != nil {
+		return err
+	}
+	outcome, err := runAgentEditedScan(ctx, agentEditedScanOptions{
+		Root:            root,
+		State:           state,
+		Label:           "edited-file",
+		Automatic:       false,
+		MaxTargets:      0,
+		Sarif:           *sarif,
+		EngineMode:      *engineMode,
+		OpenGrepPath:    *opengrepPath,
+		OpenGrepVersion: *opengrepVersion,
+		Messages:        defaultAgentScanMessages(false, "edited-file"),
+	})
+	if err != nil {
+		return err
+	}
+	if outcome.Message == "" {
+		return errors.New("no agent-edited files are tracked; edit files with an agent plugin or run greprules scan --changed")
+	}
+	if outcome.Status != "scanned" {
+		return errors.New(outcome.Message)
+	}
+	fmt.Fprintln(os.Stdout, outcome.Message)
+	return nil
+}
+
+func scanEditedState(root string, stateDir string) (agentstate.State, error) {
+	return agentstate.New(root, stateDir)
+}
+
 func runScanWithOptions(ctx context.Context, args []string, options scanCommandOptions) error {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	rootFlag := fs.String("root", ".", "repo root or child path")
@@ -553,129 +607,20 @@ func runScanWithOptions(ctx context.Context, args []string, options scanCommandO
 	if err := ensureGreprulesGitignore(root); err != nil {
 		return err
 	}
-	cfg, err := loadOrDefaultConfig(root)
-	if err != nil {
-		return err
-	}
-	lock, err := config.LoadLock(root)
-	if err != nil {
-		return fmt.Errorf("lockfile missing; run greprules fetch first: %w", err)
-	}
-	runtimeInfo, err := runtimeFromConfigOrLock(lock, cfg, *engineMode, *opengrepPath, *opengrepVersion)
-	if err != nil {
-		return fmt.Errorf("OpenGrep runtime is not available: %w", err)
-	}
-	lock.Engine = lockedEngineFromRuntime(runtimeInfo)
-	if err := config.SaveLock(root, lock); err != nil {
-		return err
-	}
-	outputDir := absFromRoot(root, cfg.OutputDir)
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
-		return err
-	}
-	explicitTargets, explicitTargetMode, err := scanTargetsFromFlags(root, targetFlags, *targetsFrom)
-	if err != nil {
-		return err
-	}
-	if explicitTargetMode && *full {
-		return errors.New("--full cannot be combined with --target or --targets-from")
-	}
-	targets := []string{"."}
-	changedMode := *changed && !*full && !explicitTargetMode
-	var changedFiles []string
-	var emptyTargetsWarning string
-	if explicitTargetMode {
-		targets = explicitTargets
-		if len(targets) == 0 {
-			emptyTargetsWarning = "no explicit targets to scan"
-		}
-	} else if changedMode {
-		changedFiles, err = gitutil.ChangedFiles(root)
-		if err != nil {
-			return err
-		}
-		targets = changedFiles
-		if len(targets) == 0 {
-			emptyTargetsWarning = "no changed files to scan"
-		}
-	}
-	jsonPath := filepath.Join(outputDir, "scan.json")
-	sarifPath := filepath.Join(outputDir, "scan.sarif")
-	agentPath := filepath.Join(outputDir, "agent-result.json")
-	startedAt := time.Now().UTC().Format(time.RFC3339)
-	scanConfigs := combinedScanConfigs(root, lock, cfg.OpenGrep.IncludeDefaultRules)
-	result := baseAgentResult(root, lock, runtimeInfo, changedMode, changedFiles, targets, scanConfigs, jsonPath, sarifPath)
-	result.Scan.StartedAt = startedAt
-	if emptyTargetsWarning != "" {
-		result.Status = "ok"
-		result.Warnings = append(result.Warnings, emptyTargetsWarning)
-		result.Scan.FinishedAt = time.Now().UTC().Format(time.RFC3339)
-		return output.WriteAgentResult(agentPath, result)
-	}
-	if err := removeOutputFile(jsonPath); err != nil {
-		return err
-	}
-	jsonRunErr := opengrep.RunScan(ctx, runtimeInfo, opengrep.ScanOptions{
-		WorkingDir: root,
-		Configs:    scanConfigs,
-		Targets:    targets,
-		OutputPath: jsonPath,
-		Format:     "json",
-		Stdout:     options.stdout,
-		Stderr:     options.stderr,
+	return scanservice.Run(ctx, scanservice.Options{
+		Root:            root,
+		Changed:         *changed,
+		Full:            *full,
+		SARIF:           *sarif,
+		EngineMode:      *engineMode,
+		OpenGrepPath:    *opengrepPath,
+		OpenGrepVersion: *opengrepVersion,
+		Targets:         []string(targetFlags),
+		TargetsFrom:     *targetsFrom,
+		Quiet:           options.quiet,
+		Stdout:          options.stdout,
+		Stderr:          options.stderr,
 	})
-	findings, parseErr := output.FindingsFromOpenGrepJSON(jsonPath)
-	if parseErr != nil {
-		result.Warnings = append(result.Warnings, "could not parse OpenGrep JSON: "+parseErr.Error())
-		if jsonRunErr != nil {
-			result.Status = "failed"
-			result.Errors = append(result.Errors, jsonRunErr.Error())
-			result.Scan.FinishedAt = time.Now().UTC().Format(time.RFC3339)
-			_ = output.WriteAgentResult(agentPath, result)
-			return jsonRunErr
-		}
-	} else {
-		result.Findings = findings
-		if jsonRunErr != nil {
-			result.Warnings = append(result.Warnings, openGrepRunWarning("JSON run", jsonRunErr))
-		}
-		if warnings, err := output.WarningsFromOpenGrepJSON(jsonPath); err != nil {
-			result.Warnings = append(result.Warnings, "could not parse OpenGrep diagnostics: "+err.Error())
-		} else {
-			result.Warnings = append(result.Warnings, warnings...)
-		}
-	}
-	if *sarif {
-		if err := removeOutputFile(sarifPath); err != nil {
-			return err
-		}
-		if err := opengrep.RunScan(ctx, runtimeInfo, opengrep.ScanOptions{
-			WorkingDir: root,
-			Configs:    scanConfigs,
-			Targets:    targets,
-			OutputPath: sarifPath,
-			Format:     "sarif",
-			Stdout:     options.stdout,
-			Stderr:     options.stderr,
-		}); err != nil {
-			result.Warnings = append(result.Warnings, openGrepRunWarning("SARIF run", err))
-		}
-	} else {
-		result.SARIFPath = ""
-	}
-	result.Status = "ok"
-	result.Scan.FinishedAt = time.Now().UTC().Format(time.RFC3339)
-	if err := output.WriteAgentResult(agentPath, result); err != nil {
-		return err
-	}
-	if !options.quiet {
-		writer := options.stdout
-		if writer == nil {
-			writer = os.Stdout
-		}
-		fmt.Fprintln(writer, "wrote", relToRoot(root, agentPath))
-	}
-	return nil
 }
 
 func runDoctor(ctx context.Context, args []string) error {
@@ -693,193 +638,20 @@ func runDoctor(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	report, err := buildDoctorReport(ctx, root, *debug, *engineMode, *opengrepPath, *opengrepVersion)
+	report, err := doctor.Build(ctx, root, doctor.Options{
+		Debug:           *debug,
+		EngineMode:      *engineMode,
+		OpenGrepPath:    *opengrepPath,
+		OpenGrepVersion: *opengrepVersion,
+	})
 	if err != nil {
 		return err
 	}
 	if *format == "json" {
 		return printJSON(report)
 	}
-	printDoctorText(report, *debug)
+	doctor.PrintText(os.Stdout, report, *debug)
 	return nil
-}
-
-func buildDoctorReport(ctx context.Context, root string, debug bool, engineMode string, opengrepPath string, opengrepVersion string) (doctorReport, error) {
-	resolution, err := config.LoadEffectiveConfig(root)
-	if err != nil {
-		return doctorReport{}, err
-	}
-	cfg := resolution.Config
-	report := doctorReport{
-		SchemaVersion:       "greprules.doctor.v1",
-		Root:                root,
-		Config:              resolution,
-		RecommendedCommands: []string{},
-		Warnings:            append([]string{}, resolution.Warnings...),
-	}
-	if _, err := registry.New(cfg.Registry).ListPacks(ctx); err != nil {
-		report.Registry = checkStatus{OK: false, Error: err.Error(), URL: cfg.Registry}
-		report.RecommendedCommands = append(report.RecommendedCommands, "check registry URL or run with --registry")
-	} else {
-		report.Registry = checkStatus{OK: true, URL: cfg.Registry}
-	}
-	if lock, err := config.LoadLock(root); err != nil {
-		report.Lock = lockStatus{Exists: false, Path: config.LockPath(root), Error: err.Error()}
-		report.RecommendedCommands = append(report.RecommendedCommands, "greprules fetch")
-	} else {
-		report.Lock = lockStatus{Exists: true, Path: config.LockPath(root), PackCount: len(lock.Packs)}
-		if debug {
-			report.Lock.Value = &lock
-		}
-	}
-	if runtimeInfo, err := opengrep.Installed(cfg.OpenGrep.Version, ""); err != nil {
-		report.OpenGrep.Managed = runtimeCheck{OK: false, Error: err.Error()}
-	} else {
-		report.OpenGrep.Managed = runtimeCheck{OK: true, Runtime: &runtimeInfo}
-	}
-	if runtimeInfo, err := opengrep.Resolve(opengrep.ResolveOptions{Mode: "system"}); err != nil {
-		report.OpenGrep.System = runtimeCheck{OK: false, Error: err.Error()}
-	} else {
-		report.OpenGrep.System = runtimeCheck{OK: true, Runtime: &runtimeInfo}
-	}
-	if runtimeInfo, err := runtimeFromConfigOrLock(config.Lock{}, cfg, engineMode, opengrepPath, opengrepVersion); err != nil {
-		report.OpenGrep.Active = runtimeCheck{OK: false, Error: err.Error()}
-	} else {
-		report.OpenGrep.Active = runtimeCheck{OK: true, Runtime: &runtimeInfo}
-	}
-	addOpenGrepRecommendations(&report, cfg)
-	report.Status = "ok"
-	if !report.Registry.OK || !report.Lock.Exists || !report.OpenGrep.Active.OK {
-		report.Status = "needs_attention"
-	}
-	return report, nil
-}
-
-type doctorReport struct {
-	SchemaVersion       string                  `json:"schemaVersion"`
-	Status              string                  `json:"status"`
-	Root                string                  `json:"root"`
-	Config              config.ConfigResolution `json:"config"`
-	Registry            checkStatus             `json:"registry"`
-	Lock                lockStatus              `json:"lock"`
-	OpenGrep            opengrepStatus          `json:"opengrep"`
-	RecommendedCommands []string                `json:"recommendedCommands,omitempty"`
-	Warnings            []string                `json:"warnings,omitempty"`
-}
-
-type checkStatus struct {
-	OK    bool   `json:"ok"`
-	URL   string `json:"url,omitempty"`
-	Error string `json:"error,omitempty"`
-}
-
-type lockStatus struct {
-	Exists    bool         `json:"exists"`
-	Path      string       `json:"path"`
-	PackCount int          `json:"packCount,omitempty"`
-	Error     string       `json:"error,omitempty"`
-	Value     *config.Lock `json:"value,omitempty"`
-}
-
-type opengrepStatus struct {
-	Managed runtimeCheck `json:"managed"`
-	System  runtimeCheck `json:"system"`
-	Active  runtimeCheck `json:"active"`
-}
-
-type runtimeCheck struct {
-	OK      bool              `json:"ok"`
-	Runtime *opengrep.Runtime `json:"runtime,omitempty"`
-	Error   string            `json:"error,omitempty"`
-}
-
-func addOpenGrepRecommendations(report *doctorReport, cfg config.Config) {
-	if report.OpenGrep.Active.OK {
-		return
-	}
-
-	switch cfg.OpenGrep.Mode {
-	case "managed":
-		if report.OpenGrep.System.OK {
-			addRecommendedCommand(report, "greprules config set opengrep.mode system --global")
-			return
-		}
-		addRecommendedCommand(report, "greprules setup-opengrep")
-	case "system":
-		if report.OpenGrep.Managed.OK {
-			addRecommendedCommand(report, "greprules config set opengrep.mode managed --global")
-			return
-		}
-		addRecommendedCommand(report, "greprules setup-opengrep")
-	case "path":
-		if report.OpenGrep.System.OK {
-			addRecommendedCommand(report, "greprules config set opengrep.mode system --global")
-			return
-		}
-		if report.OpenGrep.Managed.OK {
-			addRecommendedCommand(report, "greprules config set opengrep.mode managed --global")
-			return
-		}
-		addRecommendedCommand(report, "greprules setup-opengrep")
-	default:
-		addRecommendedCommand(report, "greprules doctor --format json")
-	}
-}
-
-func addRecommendedCommand(report *doctorReport, command string) {
-	for _, existing := range report.RecommendedCommands {
-		if existing == command {
-			return
-		}
-	}
-	report.RecommendedCommands = append(report.RecommendedCommands, command)
-}
-
-func printDoctorText(report doctorReport, debug bool) {
-	fmt.Println("repo:", report.Root)
-	for _, source := range report.Config.Sources {
-		if source.Path == "" {
-			fmt.Printf("config %s: loaded=%t\n", source.Scope, source.Loaded)
-		} else {
-			fmt.Printf("config %s: loaded=%t path=%s\n", source.Scope, source.Loaded, source.Path)
-		}
-	}
-	cfg := report.Config.Config
-	fmt.Printf("opengrep config: mode=%s version=%s", cfg.OpenGrep.Mode, cfg.OpenGrep.Version)
-	if cfg.OpenGrep.Path != "" {
-		fmt.Printf(" path=%s", cfg.OpenGrep.Path)
-	}
-	fmt.Println()
-	if report.Registry.OK {
-		fmt.Println("registry: ok")
-	} else {
-		fmt.Println("registry:", report.Registry.Error)
-	}
-	if report.Lock.Exists {
-		fmt.Printf("lock: %d pack(s)\n", report.Lock.PackCount)
-		if debug && report.Lock.Value != nil {
-			_ = printJSON(report.Lock.Value)
-		}
-	} else {
-		fmt.Println("lock: missing")
-	}
-	printRuntimeText("opengrep managed", report.OpenGrep.Managed)
-	printRuntimeText("opengrep system", report.OpenGrep.System)
-	printRuntimeText("opengrep active", report.OpenGrep.Active)
-	for _, warning := range report.Warnings {
-		fmt.Println("warning:", warning)
-	}
-	for _, command := range report.RecommendedCommands {
-		fmt.Println("recommended:", command)
-	}
-}
-
-func printRuntimeText(label string, check runtimeCheck) {
-	if !check.OK {
-		fmt.Println(label+":", "missing")
-		return
-	}
-	fmt.Printf("%s: mode=%s version=%s path=%s\n", label, check.Runtime.Mode, check.Runtime.Version, check.Runtime.Path)
 }
 
 func runCleanup(args []string) error {
@@ -888,7 +660,7 @@ func runCleanup(args []string) error {
 	configFlag := fs.Bool("config", false, "remove user-level greprules config")
 	cacheFlag := fs.Bool("cache", false, "remove all user-level greprules caches")
 	opengrepFlag := fs.Bool("opengrep", false, "remove managed OpenGrep cache")
-	pluginCacheFlag := fs.Bool("plugin-cache", false, "remove Claude plugin CLI bootstrap cache")
+	pluginCacheFlag := fs.Bool("plugin-cache", false, "remove agent plugin CLI bootstrap caches")
 	repoFlag := fs.Bool("repo", false, "remove repo-local .greprules directory")
 	allFlag := fs.Bool("all", false, "remove user config, user caches, and repo-local .greprules")
 	purgeFlag := fs.Bool("purge", false, "remove user config and user caches")
@@ -926,248 +698,6 @@ func runCleanup(args []string) error {
 		fmt.Println("removed", target)
 	}
 	return nil
-}
-
-func loadOrDefaultConfig(root string) (config.Config, error) {
-	resolution, err := config.LoadEffectiveConfig(root)
-	if err == nil {
-		return resolution.Config, nil
-	}
-	if errors.Is(err, os.ErrNotExist) {
-		return config.DefaultConfig(), nil
-	}
-	return config.Config{}, err
-}
-
-func runtimeFromConfigOrLock(lock config.Lock, cfg config.Config, modeOverride string, pathOverride string, versionOverride string) (opengrep.Runtime, error) {
-	mode := cfg.OpenGrep.Mode
-	path := cfg.OpenGrep.Path
-	version := cfg.OpenGrep.Version
-	if modeOverride != "" {
-		mode = modeOverride
-	}
-	if pathOverride != "" {
-		path = pathOverride
-		if modeOverride == "" {
-			mode = "path"
-		}
-	}
-	if versionOverride != "" {
-		version = versionOverride
-	}
-	if mode == "" {
-		mode = "managed"
-	}
-	if mode == "managed" && lock.Engine != nil && lock.Engine.Path != "" && (lock.Engine.Managed || lock.Engine.Mode == "managed") {
-		if _, err := os.Stat(lock.Engine.Path); err == nil {
-			return opengrep.Runtime{
-				Name:            lock.Engine.Name,
-				Mode:            firstNonEmpty(lock.Engine.Mode, "managed"),
-				Version:         lock.Engine.Version,
-				Path:            lock.Engine.Path,
-				Source:          lock.Engine.Source,
-				SHA256:          lock.Engine.SHA256,
-				Managed:         lock.Engine.Managed,
-				SignaturePath:   lock.Engine.SignaturePath,
-				CertificatePath: lock.Engine.CertificatePath,
-				DownloadedAt:    lock.Engine.DownloadedAt,
-			}, nil
-		}
-	}
-	return opengrep.Resolve(opengrep.ResolveOptions{
-		Mode:    mode,
-		Path:    path,
-		Version: version,
-	})
-}
-
-func lockedEngineFromRuntime(runtimeInfo opengrep.Runtime) *config.LockedEngine {
-	return &config.LockedEngine{
-		Name:            runtimeInfo.Name,
-		Mode:            runtimeInfo.Mode,
-		Version:         runtimeInfo.Version,
-		Path:            runtimeInfo.Path,
-		Source:          runtimeInfo.Source,
-		SHA256:          runtimeInfo.SHA256,
-		Managed:         runtimeInfo.Managed,
-		SignaturePath:   runtimeInfo.SignaturePath,
-		CertificatePath: runtimeInfo.CertificatePath,
-		DownloadedAt:    runtimeInfo.DownloadedAt,
-	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func combinedScanConfigs(root string, lock config.Lock, includeDefaultRules bool) []string {
-	paths := make([]string, 0, len(lock.Packs))
-	for _, pack := range lock.Packs {
-		paths = append(paths, absFromRoot(root, pack.RulePath))
-	}
-	if includeDefaultRules {
-		paths = append(paths, "auto")
-	}
-	return paths
-}
-
-func openGrepRunWarning(label string, err error) string {
-	if code, ok := opengrep.ExitCode(err); ok {
-		return fmt.Sprintf("OpenGrep %s exited with status %d; preserving findings from generated output", label, code)
-	}
-	return fmt.Sprintf("OpenGrep %s reported an error after writing output: %s", label, err)
-}
-
-func removeOutputFile(path string) error {
-	err := os.Remove(path)
-	if err == nil || errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	return err
-}
-
-func scanTargetsFromFlags(root string, targets stringList, targetsFrom string) ([]string, bool, error) {
-	rawTargets := append([]string{}, targets...)
-	explicitMode := len(rawTargets) > 0 || targetsFrom != ""
-	if targetsFrom != "" {
-		fileTargets, err := readTargetsFile(targetsFrom)
-		if err != nil {
-			return nil, true, err
-		}
-		rawTargets = append(rawTargets, fileTargets...)
-	}
-	if !explicitMode {
-		return nil, false, nil
-	}
-	normalized, err := normalizeScanTargets(root, rawTargets)
-	if err != nil {
-		return nil, true, err
-	}
-	return normalized, true, nil
-}
-
-func readTargetsFile(path string) ([]string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("read targets file: %w", err)
-	}
-	defer file.Close()
-
-	var targets []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		targets = append(targets, line)
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("read targets file: %w", err)
-	}
-	return targets, nil
-}
-
-func normalizeScanTargets(root string, rawTargets []string) ([]string, error) {
-	seen := map[string]bool{}
-	var normalized []string
-	for _, raw := range rawTargets {
-		target, err := normalizeScanTarget(root, raw)
-		if err != nil {
-			return nil, err
-		}
-		if target == "" || seen[target] {
-			continue
-		}
-		seen[target] = true
-		normalized = append(normalized, target)
-	}
-	sort.Strings(normalized)
-	return normalized, nil
-}
-
-func normalizeScanTarget(root string, raw string) (string, error) {
-	target := strings.TrimSpace(raw)
-	if target == "" {
-		return "", nil
-	}
-	if filepath.IsAbs(target) {
-		rel, err := filepath.Rel(root, target)
-		if err != nil {
-			return "", err
-		}
-		target = rel
-	}
-	target = filepath.Clean(target)
-	if target == "." {
-		return ".", nil
-	}
-	if target == ".." || strings.HasPrefix(target, ".."+string(os.PathSeparator)) || filepath.IsAbs(target) {
-		return "", fmt.Errorf("scan target is outside root: %s", raw)
-	}
-	if _, err := os.Stat(filepath.Join(root, target)); err != nil {
-		return "", fmt.Errorf("scan target is not available: %s: %w", target, err)
-	}
-	return target, nil
-}
-
-func baseAgentResult(root string, lock config.Lock, runtimeInfo opengrep.Runtime, changedMode bool, changedFiles []string, targets []string, scanConfigs []string, jsonPath string, sarifPath string) output.AgentResult {
-	packs := make([]output.PackInfo, 0, len(lock.Packs))
-	for _, pack := range lock.Packs {
-		packs = append(packs, output.PackInfo{
-			ID:         pack.ID,
-			Version:    pack.Version,
-			SHA256:     pack.SHA256,
-			RulePath:   pack.RulePath,
-			TotalRules: pack.TotalRules,
-		})
-	}
-	return output.AgentResult{
-		SchemaVersion: "greprules.agent.v1",
-		Status:        "running",
-		Repo: output.RepoInfo{
-			Root:         root,
-			ChangedMode:  changedMode,
-			ChangedFiles: changedFiles,
-		},
-		Packs: packs,
-		Engine: output.EngineInfo{
-			Name:    runtimeInfo.Name,
-			Mode:    runtimeInfo.Mode,
-			Source:  runtimeInfo.Source,
-			Version: runtimeInfo.Version,
-			Path:    runtimeInfo.Path,
-			SHA256:  runtimeInfo.SHA256,
-			Managed: runtimeInfo.Managed,
-		},
-		Scan: output.ScanInfo{
-			Targets: targets,
-			Configs: scanConfigs,
-		},
-		Findings:  []output.Finding{},
-		JSONPath:  relToRoot(root, jsonPath),
-		SARIFPath: relToRoot(root, sarifPath),
-	}
-}
-
-func absFromRoot(root, path string) string {
-	if filepath.IsAbs(path) {
-		return path
-	}
-	return filepath.Join(root, path)
-}
-
-func relToRoot(root, path string) string {
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return path
-	}
-	return rel
 }
 
 var greprulesGitignoreEntries = []string{
@@ -1313,7 +843,7 @@ func greprulesPluginCacheRoot() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, "claude-plugin"), nil
+	return filepath.Join(root, "plugins"), nil
 }
 
 func writeConfigPatch(path string, format string, schemaVersion string, values map[string]string) error {

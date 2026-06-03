@@ -2,7 +2,7 @@
 
 Agent plugin for fetching trusted SAST rule packs from greprules.io and scanning local code changes with OpenGrep.
 
-greprules is designed for local coding agents first. The Claude Code plugin gives Claude slash commands for checking setup, configuring OpenGrep, fetching rule packs, and scanning the files it edits. The Go CLI is the local runtime behind those commands.
+greprules is designed for local coding agents first. The Claude Code and Hermes plugins give agents slash commands for checking setup, configuring OpenGrep, fetching rule packs, and scanning local code changes. The Go CLI is the local runtime behind those commands.
 
 ## Quick Start
 
@@ -15,10 +15,10 @@ Run these inside Claude Code:
 
 /greprules:doctor
 /greprules:configure
-/greprules:scan
+/greprules:scan-edited
 ```
 
-`/greprules:doctor` is the best first command. It checks the registry, OpenGrep runtime, local lockfile, and any setup steps Claude should handle before scanning.
+`/greprules:doctor` is the best first command. It checks registry access, OpenGrep runtime readiness, and local rule-pack fetch state. A missing `.greprules/lock.json` means rule packs have not been fetched yet; scan commands can fetch them automatically when the registry is reachable.
 
 ## What It Does
 
@@ -37,15 +37,20 @@ All user-facing plugin commands are prefixed with `/greprules:`.
 | --- | --- |
 | `/greprules:doctor` | You want to check whether greprules is ready in the current repo. |
 | `/greprules:configure` | OpenGrep needs to be installed, selected, or switched between managed/system/path modes. |
-| `/greprules:scan` | You want Claude to fetch rule packs if needed and scan changed files or named targets. |
+| `/greprules:scan-edited` | You want to scan files Claude Code edited in the current session. |
+| `/greprules:scan-working-tree` | You want to scan git working tree, staged, and untracked files. |
+| `/greprules:scan-target <path>` | You want to scan explicit files or directories. A path is required. |
+| `/greprules:scan-full` | You want to scan the full repository. |
 
 Common examples:
 
 ```text
 /greprules:doctor
 /greprules:configure
-/greprules:scan
-/greprules:scan src/auth
+/greprules:scan-edited
+/greprules:scan-working-tree
+/greprules:scan-target src/auth
+/greprules:scan-full
 ```
 
 ## Typical Workflow
@@ -54,7 +59,7 @@ Common examples:
 2. Run `/greprules:doctor`.
 3. If setup is needed, run `/greprules:configure`.
 4. Let Claude edit code as usual.
-5. Run `/greprules:scan`, or let the plugin's Stop hook scan the files Claude edited.
+5. Run `/greprules:scan-edited`, or let the plugin's Stop hook scan the files Claude edited.
 6. Claude reads the scan result, separates likely true positives from noise, and proposes fixes.
 
 The plugin does not require install-time configuration. Runtime choices are stored in greprules config so Claude Code, terminals, and CI can share the same behavior.
@@ -63,7 +68,7 @@ The plugin does not require install-time configuration. Runtime choices are stor
 
 The Claude Code plugin includes lightweight hooks for agent editing sessions:
 
-- `SessionStart` checks readiness and reports setup gaps.
+- `SessionStart` checks registry and OpenGrep readiness. Missing rule packs are not reported as setup gaps because scan commands can fetch them automatically.
 - `PostToolUse` records files Claude edited with `Edit`, `MultiEdit`, `Write`, or `NotebookEdit`.
 - `Stop` scans the edited files once, then asks Claude to review the result before finishing.
 
@@ -72,6 +77,33 @@ Set this before starting Claude Code to disable automatic scans for a session:
 ```bash
 export GREPRULES_AUTO_SCAN=false
 ```
+
+This disables the Stop hook scan and block. Edited-file tracking stays enabled, so you can still run `/greprules:scan-edited` manually; a successful manual edited-file scan clears the tracked state. To disable tracking as well:
+
+```bash
+export GREPRULES_TRACK_EDITED_FILES=false
+```
+
+## Hermes Plugin
+
+The Hermes plugin lives in `plugins/hermes` and follows Hermes' standard `plugin.yaml` plus `__init__.py` layout. Install or copy it into `~/.hermes/plugins/greprules`, then enable it:
+
+```bash
+hermes plugins enable greprules
+```
+
+Hermes slash commands:
+
+```text
+/greprules doctor
+/greprules configure managed
+/greprules scan-edited
+/greprules scan-working-tree
+/greprules scan-target src/auth
+/greprules scan-full
+```
+
+The plugin tracks edited files with `post_tool_call` and can inject compact edited-file scan results before the next model turn with `pre_llm_call`. Set `GREPRULES_HERMES_AUTO_SCAN=false` to disable automatic context injection while keeping manual commands available.
 
 ## OpenGrep Runtime
 
@@ -130,6 +162,7 @@ The CLI is useful when you want the same scan behavior outside Claude Code.
 greprules doctor
 greprules init --mode auto
 greprules fetch
+greprules scan-edited
 greprules scan --changed
 ```
 
@@ -201,15 +234,15 @@ GREPRULES_REGISTRY=http://127.0.0.1:8790 greprules doctor
 
 ## Plugin Runtime
 
-The Claude Code plugin ships a `bin/greprules` wrapper. It resolves the real CLI in this order:
+Agent plugins ship a `bin/greprules` wrapper. It resolves the real CLI in this order:
 
 ```text
 GREPRULES_CLI_PATH
 system PATH, excluding the plugin wrapper itself
-GitHub Release bootstrap into <user-cache-dir>/greprules/claude-plugin/greprules/v0.1.2/greprules
+GitHub Release bootstrap into <user-cache-dir>/greprules/plugins/<provider>/greprules/<version>/greprules
 ```
 
-For plugin-specific details, see [`plugins/claude-code/README.md`](plugins/claude-code/README.md).
+For plugin-specific details, see [`plugins/claude-code/README.md`](plugins/claude-code/README.md) and [`plugins/hermes/README.md`](plugins/hermes/README.md).
 
 ## Development
 
@@ -229,7 +262,7 @@ export GREPRULES_CLI_PATH="$PWD/greprules"
 To override the plugin bootstrap release during testing:
 
 ```bash
-export GREPRULES_VERSION=v0.1.2
+export GREPRULES_VERSION=v0.1.4
 export GREPRULES_PLUGIN_CACHE_DIR=/tmp/greprules-plugin-cache
 ```
 

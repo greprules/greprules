@@ -109,15 +109,15 @@ plugin_cache_dir() {
   case "$(uname -s)" in
     Darwin)
       [[ -n "${HOME:-}" ]] || return 1
-      printf '%s' "${HOME}/Library/Caches/greprules/plugins/claude-code"
+      printf '%s' "${HOME}/Library/Caches/greprules/plugins/hermes"
       ;;
     Linux)
       if [[ -n "${XDG_CACHE_HOME:-}" ]]; then
-        printf '%s' "${XDG_CACHE_HOME}/greprules/plugins/claude-code"
+        printf '%s' "${XDG_CACHE_HOME}/greprules/plugins/hermes"
       elif [[ -n "${HOME:-}" ]]; then
-        printf '%s' "${HOME}/.cache/greprules/plugins/claude-code"
+        printf '%s' "${HOME}/.cache/greprules/plugins/hermes"
       else
-        printf '%s' "${TMPDIR:-/tmp}/greprules/plugins/claude-code"
+        printf '%s' "${TMPDIR:-/tmp}/greprules/plugins/hermes"
       fi
       ;;
     MINGW*|MSYS*|CYGWIN*)
@@ -129,10 +129,10 @@ plugin_cache_dir() {
       if command -v cygpath >/dev/null 2>&1; then
         base="$(cygpath -u "$base")"
       fi
-      printf '%s' "${base}/greprules/plugins/claude-code"
+      printf '%s' "${base}/greprules/plugins/hermes"
       ;;
     *)
-      printf '%s' "${TMPDIR:-/tmp}/greprules/plugins/claude-code"
+      printf '%s' "${TMPDIR:-/tmp}/greprules/plugins/hermes"
       ;;
   esac
 }
