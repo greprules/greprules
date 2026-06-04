@@ -12,7 +12,10 @@ Rules:
 - Prefer `greprules config set` over editing config files directly.
 - Persist OpenGrep runtime selection with `--global` unless the user asks for repository-local settings.
 - Do not write machine-specific `opengrep.path` to shared `.greprules/config.yaml`.
-- OpenGrep default rules are included by default with `opengrep.includeDefaultRules=true`; only change this if the user asks for greprules.io packs only.
+- OpenGrep default rules are disabled by default with `opengrep.includeDefaultRules=false`; only enable them if the user explicitly asks to include OpenGrep's default auto-selected rules.
+- Automatic Stop hook scans are disabled by default with `agent.autoScan=false`; enable them only when the user asks for automatic scan-on-edit behavior.
+- `opengrep.includeDefaultRules` and `agent.autoScan` both accept `true|false`; use `true` to opt in and `false` to opt out again.
+- Persist repeated agent behavior preferences with `agent.*` config keys. Use environment variables only for one-session overrides.
 
 Common commands:
 
@@ -22,7 +25,11 @@ greprules config set opengrep.mode system --global
 greprules config set opengrep.mode managed --global
 greprules config set opengrep.mode path --global
 greprules config set opengrep.path /absolute/path/to/opengrep --global
-greprules config set opengrep.includeDefaultRules false --global
+greprules config set opengrep.includeDefaultRules true --global
+greprules config set agent.autoScan true --global
+greprules config set agent.trackEditedFiles false --global
+greprules config set agent.autoScanMinIntervalSeconds 45 --global
+greprules config set agent.autoScanMaxChangedFiles 100 --global
 greprules config inspect --format json
 greprules doctor --format json
 ```

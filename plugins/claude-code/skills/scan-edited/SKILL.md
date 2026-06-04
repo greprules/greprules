@@ -4,7 +4,7 @@ description: Scan files that Claude Code edited in the current session with grep
 
 Use this skill when the user asks for `/greprules:scan-edited` or wants to manually scan files Claude Code edited.
 
-This command uses the file list tracked by the plugin `PostToolUse` hook. It is the manual counterpart to the automatic Stop hook scan. `GREPRULES_AUTO_SCAN=false` disables the Stop hook scan and block behavior, but edited-file tracking remains enabled so this command can still be used. A successful edited-file scan clears the tracked state.
+This command uses the file list tracked by the plugin `PostToolUse` hook. It is the manual counterpart to the optional automatic Stop hook scan. Automatic Stop hook scans are disabled by default; `greprules config set agent.autoScan true --global` enables the Stop hook scan and block behavior while keeping this command available. A successful edited-file scan clears the tracked state. `GREPRULES_AUTO_SCAN=true` remains available as a one-session override.
 
 Workflow:
 
@@ -23,5 +23,5 @@ Workflow:
 Fallbacks:
 
 - If no edited files are tracked, say that Claude Code has no tracked edited-file targets yet and suggest `/greprules:scan-working-tree` or `/greprules:scan-target <path>`.
-- If edited-file tracking was disabled with `GREPRULES_TRACK_EDITED_FILES=false`, explain that `/greprules:scan-edited` has no source of targets in that session.
+- If edited-file tracking was disabled with `agent.trackEditedFiles=false` or `GREPRULES_TRACK_EDITED_FILES=false`, explain that `/greprules:scan-edited` has no source of targets in that session.
 - If registry access fails, report the registry URL and the error from `doctor --format json`.

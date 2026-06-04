@@ -30,6 +30,7 @@ type Config struct {
 	CacheDir      string       `json:"cacheDir" yaml:"cacheDir"`
 	OutputDir     string       `json:"outputDir" yaml:"outputDir"`
 	Scan          ScanConfig   `json:"scan" yaml:"scan"`
+	Agent         AgentConfig  `json:"agent" yaml:"agent"`
 	OpenGrep      EngineConfig `json:"opengrep" yaml:"opengrep"`
 }
 
@@ -37,6 +38,13 @@ type ScanConfig struct {
 	ChangedDefault bool `json:"changedDefault" yaml:"changedDefault"`
 	SARIF          bool `json:"sarif" yaml:"sarif"`
 	AgentJSON      bool `json:"agentJson" yaml:"agentJson"`
+}
+
+type AgentConfig struct {
+	AutoScan                   bool `json:"autoScan" yaml:"autoScan"`
+	TrackEditedFiles           bool `json:"trackEditedFiles" yaml:"trackEditedFiles"`
+	AutoScanMinIntervalSeconds int  `json:"autoScanMinIntervalSeconds" yaml:"autoScanMinIntervalSeconds"`
+	AutoScanMaxChangedFiles    int  `json:"autoScanMaxChangedFiles" yaml:"autoScanMaxChangedFiles"`
 }
 
 type EngineConfig struct {
@@ -70,6 +78,7 @@ type ConfigPatch struct {
 	CacheDir      *string           `json:"cacheDir" yaml:"cacheDir"`
 	OutputDir     *string           `json:"outputDir" yaml:"outputDir"`
 	Scan          ScanConfigPatch   `json:"scan" yaml:"scan"`
+	Agent         AgentConfigPatch  `json:"agent" yaml:"agent"`
 	OpenGrep      EngineConfigPatch `json:"opengrep" yaml:"opengrep"`
 }
 
@@ -77,6 +86,13 @@ type ScanConfigPatch struct {
 	ChangedDefault *bool `json:"changedDefault" yaml:"changedDefault"`
 	SARIF          *bool `json:"sarif" yaml:"sarif"`
 	AgentJSON      *bool `json:"agentJson" yaml:"agentJson"`
+}
+
+type AgentConfigPatch struct {
+	AutoScan                   *bool `json:"autoScan" yaml:"autoScan"`
+	TrackEditedFiles           *bool `json:"trackEditedFiles" yaml:"trackEditedFiles"`
+	AutoScanMinIntervalSeconds *int  `json:"autoScanMinIntervalSeconds" yaml:"autoScanMinIntervalSeconds"`
+	AutoScanMaxChangedFiles    *int  `json:"autoScanMaxChangedFiles" yaml:"autoScanMaxChangedFiles"`
 }
 
 type EngineConfigPatch struct {
@@ -138,12 +154,18 @@ func DefaultConfig() Config {
 			SARIF:          true,
 			AgentJSON:      true,
 		},
+		Agent: AgentConfig{
+			AutoScan:                   false,
+			TrackEditedFiles:           true,
+			AutoScanMinIntervalSeconds: 45,
+			AutoScanMaxChangedFiles:    100,
+		},
 		OpenGrep: EngineConfig{
 			Managed:             true,
 			Mode:                "managed",
 			Version:             "latest",
 			Path:                "",
-			IncludeDefaultRules: true,
+			IncludeDefaultRules: false,
 		},
 	}
 }
@@ -327,6 +349,12 @@ func normalizeConfig(cfg *Config) {
 		cfg.Scan.SARIF = true
 		cfg.Scan.AgentJSON = true
 	}
+	if cfg.Agent.AutoScanMinIntervalSeconds < 0 {
+		cfg.Agent.AutoScanMinIntervalSeconds = 45
+	}
+	if cfg.Agent.AutoScanMaxChangedFiles < 0 {
+		cfg.Agent.AutoScanMaxChangedFiles = 100
+	}
 	if cfg.OpenGrep.Mode == "" {
 		if cfg.OpenGrep.Path != "" {
 			cfg.OpenGrep.Mode = "path"
@@ -395,6 +423,18 @@ func applyPatch(cfg *Config, patch ConfigPatch, scope string, allowEnginePath bo
 	if patch.Scan.AgentJSON != nil {
 		cfg.Scan.AgentJSON = *patch.Scan.AgentJSON
 	}
+	if patch.Agent.AutoScan != nil {
+		cfg.Agent.AutoScan = *patch.Agent.AutoScan
+	}
+	if patch.Agent.TrackEditedFiles != nil {
+		cfg.Agent.TrackEditedFiles = *patch.Agent.TrackEditedFiles
+	}
+	if patch.Agent.AutoScanMinIntervalSeconds != nil {
+		cfg.Agent.AutoScanMinIntervalSeconds = *patch.Agent.AutoScanMinIntervalSeconds
+	}
+	if patch.Agent.AutoScanMaxChangedFiles != nil {
+		cfg.Agent.AutoScanMaxChangedFiles = *patch.Agent.AutoScanMaxChangedFiles
+	}
 	if patch.OpenGrep.Managed != nil {
 		cfg.OpenGrep.Managed = *patch.OpenGrep.Managed
 	}
@@ -448,6 +488,38 @@ func applyEnv(cfg *Config) []string {
 	}
 	if value := os.Getenv("GREPRULES_OUTPUT_DIR"); value != "" {
 		cfg.OutputDir = value
+	}
+	if value := os.Getenv("GREPRULES_AUTO_SCAN"); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			warnings = append(warnings, "GREPRULES_AUTO_SCAN ignored; expected boolean")
+		} else {
+			cfg.Agent.AutoScan = parsed
+		}
+	}
+	if value := os.Getenv("GREPRULES_TRACK_EDITED_FILES"); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			warnings = append(warnings, "GREPRULES_TRACK_EDITED_FILES ignored; expected boolean")
+		} else {
+			cfg.Agent.TrackEditedFiles = parsed
+		}
+	}
+	if value := os.Getenv("GREPRULES_AUTO_SCAN_MIN_INTERVAL_SECONDS"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 0 {
+			warnings = append(warnings, "GREPRULES_AUTO_SCAN_MIN_INTERVAL_SECONDS ignored; expected non-negative integer")
+		} else {
+			cfg.Agent.AutoScanMinIntervalSeconds = parsed
+		}
+	}
+	if value := os.Getenv("GREPRULES_AUTO_SCAN_MAX_CHANGED_FILES"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 0 {
+			warnings = append(warnings, "GREPRULES_AUTO_SCAN_MAX_CHANGED_FILES ignored; expected non-negative integer")
+		} else {
+			cfg.Agent.AutoScanMaxChangedFiles = parsed
+		}
 	}
 	if cfg.OpenGrep.Mode == "path" && cfg.OpenGrep.Path == "" {
 		warnings = append(warnings, "opengrep.mode is path but opengrep.path is empty")

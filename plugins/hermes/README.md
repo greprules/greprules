@@ -26,9 +26,15 @@ The bundled wrapper can download the configured greprules release into a user ca
 
 ```text
 /greprules doctor
+/greprules configure registry https://api.greprules.io
 /greprules configure managed
 /greprules configure system
 /greprules configure path /absolute/path/to/opengrep
+/greprules configure include-default-rules true
+/greprules configure auto-scan true
+/greprules configure track-edited-files false
+/greprules configure auto-scan-min-interval 45
+/greprules configure auto-scan-max-changed-files 100
 /greprules fetch
 /greprules scan-edited
 /greprules scan-working-tree
@@ -49,12 +55,21 @@ Aliases:
 ## Hooks
 
 - `post_tool_call` tracks files edited through Hermes file tools.
-- `pre_llm_call` scans tracked edited files before the next model turn and injects a compact result summary as context. If rule-pack selection is ambiguous, it returns instructions to inspect available packs and fetch explicit slugs before rerunning the scan.
+- `pre_llm_call` scans tracked edited files before the next model turn when `agent.autoScan=true` and injects a compact result summary as context. If rule-pack selection is ambiguous, it returns instructions to inspect available packs and fetch explicit slugs before rerunning the scan.
 
-Environment controls:
+Persistent controls:
 
 ```bash
-export GREPRULES_HERMES_AUTO_SCAN=false
+greprules config set agent.autoScan true --global
+greprules config set agent.trackEditedFiles false --global
+greprules config set agent.autoScanMinIntervalSeconds 45 --global
+greprules config set agent.autoScanMaxChangedFiles 100 --global
+```
+
+One-session overrides:
+
+```bash
+export GREPRULES_HERMES_AUTO_SCAN=true
 export GREPRULES_HERMES_TRACK_EDITED_FILES=false
 export GREPRULES_HERMES_AUTO_SCAN_MIN_INTERVAL_SECONDS=45
 export GREPRULES_HERMES_AUTO_SCAN_MAX_CHANGED_FILES=100

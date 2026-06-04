@@ -5,9 +5,9 @@ description: Scan files that Codex edited in the current session with greprules.
 
 # greprules Scan Edited
 
-Use this skill when the user asks Codex to scan edited files, scan the files Codex changed, or manually run the counterpart to the automatic Stop hook scan.
+Use this skill when the user asks Codex to scan edited files, scan the files Codex changed, or run the manual counterpart to the optional automatic Stop hook scan.
 
-This command uses the file list tracked by the plugin `PostToolUse` hook. `GREPRULES_AUTO_SCAN=false` disables the automatic Stop hook scan and continuation behavior, but edited-file tracking remains enabled so this skill can still be used. A successful edited-file scan clears the tracked state.
+This command uses the file list tracked by the plugin `PostToolUse` hook. Automatic Stop hook scans are disabled by default; `greprules config set agent.autoScan true --global` enables them while keeping this manual command available. A successful edited-file scan clears the tracked state. `GREPRULES_AUTO_SCAN=true` remains available as a one-session override.
 
 Workflow:
 
@@ -26,5 +26,5 @@ Workflow:
 Fallbacks:
 
 - If no edited files are tracked, say that Codex has no tracked edited-file targets yet and suggest `$greprules-scan-working-tree` or `$greprules-scan-target <path>`.
-- If edited-file tracking was disabled with `GREPRULES_TRACK_EDITED_FILES=false`, explain that this skill has no source of targets in that session.
+- If edited-file tracking was disabled with `agent.trackEditedFiles=false` or `GREPRULES_TRACK_EDITED_FILES=false`, explain that this skill has no source of targets in that session.
 - If registry access fails, report the registry URL and the error from `doctor --format json`.

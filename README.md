@@ -60,7 +60,7 @@ Common examples:
 2. Run `/greprules:doctor`.
 3. If setup is needed, run `/greprules:configure`.
 4. Let Claude edit code as usual.
-5. Run `/greprules:scan-edited`, or let the plugin's Stop hook scan the files Claude edited.
+5. Run `/greprules:scan-edited`, or enable automatic scans and let the plugin's Stop hook scan the files Claude edited.
 6. Claude reads the scan result, separates likely true positives from noise, and proposes fixes.
 
 The plugin does not require install-time configuration. Runtime choices are stored in greprules config so Claude Code, terminals, and CI can share the same behavior.
@@ -71,19 +71,21 @@ The Claude Code plugin includes lightweight hooks for agent editing sessions:
 
 - `SessionStart` checks registry and OpenGrep readiness. Missing rule packs are not reported as setup gaps because scan commands can select and fetch packs from target context.
 - `PostToolUse` records files Claude edited with `Edit`, `MultiEdit`, `Write`, or `NotebookEdit`.
-- `Stop` scans the edited files once, then asks Claude to review the result before finishing.
+- `Stop` scans edited files once when `agent.autoScan=true`, then asks Claude to review the result before finishing.
 
-Set this before starting Claude Code to disable automatic scans for a session:
-
-```bash
-export GREPRULES_AUTO_SCAN=false
-```
-
-This disables the Stop hook scan and block. Edited-file tracking stays enabled, so you can still run `/greprules:scan-edited` manually; a successful manual edited-file scan clears the tracked state. To disable tracking as well:
+Automatic scans are disabled by default. Enable them persistently:
 
 ```bash
-export GREPRULES_TRACK_EDITED_FILES=false
+greprules config set agent.autoScan true --global
 ```
+
+Edited-file tracking stays enabled by default, so you can run `/greprules:scan-edited` manually even when automatic scans are off; a successful manual edited-file scan clears the tracked state. To disable tracking as well:
+
+```bash
+greprules config set agent.trackEditedFiles false --global
+```
+
+For a one-session override, set `GREPRULES_AUTO_SCAN=true` or `GREPRULES_TRACK_EDITED_FILES=false` before starting the agent.
 
 ## Codex Plugin
 
@@ -95,7 +97,7 @@ codex plugin marketplace add greprules/greprules --sparse .agents/plugins --spar
 
 Then open `/plugins` in Codex and install or enable greprules. Open `/hooks` after enabling the plugin and trust the greprules hook entries.
 
-If greprules appears installed but automatic scans do not run, invoke `$greprules-doctor`. It checks whether the plugin is enabled and whether the `SessionStart`, `PostToolUse`, and `Stop` hook entries are trusted. Missing hook trust means the plugin is installed but the automatic edited-file scan flow is not active yet.
+If automatic scans are enabled but do not run, invoke `$greprules-doctor`. It checks whether the plugin is enabled and whether the `SessionStart`, `PostToolUse`, and `Stop` hook entries are trusted. Missing hook trust means the plugin is installed but the automatic edited-file scan flow is not active yet.
 
 Codex skills:
 
@@ -131,7 +133,7 @@ Hermes slash commands:
 /greprules scan-full
 ```
 
-The plugin tracks edited files with `post_tool_call` and can inject compact edited-file scan results before the next model turn with `pre_llm_call`. Set `GREPRULES_HERMES_AUTO_SCAN=false` to disable automatic context injection while keeping manual commands available.
+The plugin tracks edited files with `post_tool_call` and can inject compact edited-file scan results before the next model turn with `pre_llm_call` when `agent.autoScan=true`. Use `/greprules configure auto-scan true` or `greprules config set agent.autoScan true --global` to enable automatic context injection while keeping manual commands available. `GREPRULES_HERMES_AUTO_SCAN=true` remains available as a one-session override.
 
 ## OpenGrep Runtime
 
@@ -152,11 +154,22 @@ greprules config set opengrep.mode path --global
 greprules config set opengrep.path /absolute/path/to/opengrep --global
 ```
 
-By default, greprules scans fetched greprules.io packs together with OpenGrep's default auto-selected rules. To scan only greprules.io packs:
+By default, greprules scans fetched greprules.io packs only. To also include OpenGrep's default auto-selected rules:
 
 ```bash
-greprules config set opengrep.includeDefaultRules false --global
+greprules config set opengrep.includeDefaultRules true --global
 ```
+
+Agent behavior is configured through the same shared config:
+
+```bash
+greprules config set agent.autoScan true --global
+greprules config set agent.trackEditedFiles false --global
+greprules config set agent.autoScanMinIntervalSeconds 45 --global
+greprules config set agent.autoScanMaxChangedFiles 100 --global
+```
+
+Environment variables with the same behavior, such as `GREPRULES_AUTO_SCAN=true`, are intended as temporary session overrides.
 
 ## Results and Local Files
 
@@ -236,7 +249,13 @@ User/global config is JSON:
     "mode": "system",
     "path": "/Users/l0ch/.local/bin/opengrep",
     "version": "latest",
-    "includeDefaultRules": true
+    "includeDefaultRules": false
+  },
+  "agent": {
+    "autoScan": false,
+    "trackEditedFiles": true,
+    "autoScanMinIntervalSeconds": 45,
+    "autoScanMaxChangedFiles": 100
   }
 }
 ```
@@ -291,7 +310,7 @@ export GREPRULES_CLI_PATH="$PWD/greprules"
 To override the plugin bootstrap release during testing:
 
 ```bash
-export GREPRULES_VERSION=v0.2.0
+export GREPRULES_VERSION=v0.2.1
 export GREPRULES_PLUGIN_CACHE_DIR=/tmp/greprules-plugin-cache
 ```
 

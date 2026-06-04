@@ -254,6 +254,13 @@ func runConfigInspect(args []string) error {
 		fmt.Printf(" path=%s", resolution.Config.OpenGrep.Path)
 	}
 	fmt.Println()
+	fmt.Printf(
+		"agent: autoScan=%t trackEditedFiles=%t autoScanMinIntervalSeconds=%d autoScanMaxChangedFiles=%d\n",
+		resolution.Config.Agent.AutoScan,
+		resolution.Config.Agent.TrackEditedFiles,
+		resolution.Config.Agent.AutoScanMinIntervalSeconds,
+		resolution.Config.Agent.AutoScanMaxChangedFiles,
+	)
 	for _, source := range resolution.Sources {
 		if source.Path == "" {
 			fmt.Printf("source %s loaded=%t\n", source.Scope, source.Loaded)
@@ -1012,8 +1019,17 @@ func parseConfigValue(key string, raw string) (any, error) {
 			}
 		}
 		return values, nil
-	case "scan.changedDefault", "scan.sarif", "scan.agentJson", "opengrep.managed", "opengrep.includeDefaultRules":
+	case "scan.changedDefault", "scan.sarif", "scan.agentJson", "opengrep.managed", "opengrep.includeDefaultRules", "agent.autoScan", "agent.trackEditedFiles":
 		return strconv.ParseBool(raw)
+	case "agent.autoScanMinIntervalSeconds", "agent.autoScanMaxChangedFiles":
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return nil, err
+		}
+		if value < 0 {
+			return nil, fmt.Errorf("%s must be non-negative", key)
+		}
+		return value, nil
 	}
 	return raw, nil
 }
@@ -1048,6 +1064,10 @@ func validConfigKey(key string) bool {
 		"scan.changedDefault",
 		"scan.sarif",
 		"scan.agentJson",
+		"agent.autoScan",
+		"agent.trackEditedFiles",
+		"agent.autoScanMinIntervalSeconds",
+		"agent.autoScanMaxChangedFiles",
 		"opengrep.managed",
 		"opengrep.includeDefaultRules",
 		"opengrep.mode",

@@ -20,7 +20,7 @@ codex plugin marketplace add /absolute/path/to/greprules
 
 Codex requires hook review before non-managed command hooks run. Open `/hooks` after enabling the plugin and trust the greprules hook entries.
 
-If the plugin appears installed but edited-file scans do not run automatically, use `$greprules-doctor`. It checks whether the plugin is enabled and whether the `SessionStart`, `PostToolUse`, and `Stop` hook entries have been trusted in Codex. Missing hook trust means greprules is installed but the automatic scan flow is not active yet.
+If automatic scans are enabled but edited-file scans do not run, use `$greprules-doctor`. It checks whether the plugin is enabled and whether the `SessionStart`, `PostToolUse`, and `Stop` hook entries have been trusted in Codex. Missing hook trust means greprules is installed but the automatic scan flow is not active yet.
 
 ## Skills
 
@@ -41,21 +41,23 @@ The same skills can also be selected implicitly when the user asks Codex to conf
 
 - `SessionStart` checks registry and OpenGrep readiness. Missing rule packs are not treated as setup failures because scan commands can select and fetch packs from target context.
 - `PostToolUse` tracks files Codex edited through `apply_patch`/file-edit tools.
-- `Stop` scans the tracked edited files once. A clean scan is allowed to finish without a follow-up prompt. If findings, warnings, errors, or rule-pack selection work need attention, it continues Codex with instructions to keep the original development result as the primary response and append greprules review as a short secondary section.
+- `Stop` scans the tracked edited files once when `agent.autoScan=true`. A clean scan is allowed to finish without a follow-up prompt. If findings, warnings, errors, or rule-pack selection work need attention, it continues Codex with instructions to keep the original development result as the primary response and append greprules review as a short secondary section.
 
 If only some hooks are trusted, `SessionStart` can warn that automatic scans are not fully active. If `SessionStart` itself is not trusted, Codex will not run the warning hook; open `/hooks` and trust all greprules entries.
 
-Set this before starting Codex to disable the automatic Stop hook scan for a session:
+Automatic scans are disabled by default. Enable the automatic Stop hook scan persistently:
 
 ```bash
-export GREPRULES_AUTO_SCAN=false
+greprules config set agent.autoScan true --global
 ```
 
-Edited-file tracking remains enabled, so `$greprules-scan-edited` can still be run manually. To disable tracking as well:
+Edited-file tracking remains enabled by default, so `$greprules-scan-edited` can still be run manually. To disable tracking as well:
 
 ```bash
-export GREPRULES_TRACK_EDITED_FILES=false
+greprules config set agent.trackEditedFiles false --global
 ```
+
+For a one-session override, set `GREPRULES_AUTO_SCAN=true` or `GREPRULES_TRACK_EDITED_FILES=false` before starting Codex.
 
 ## CLI Resolution
 
