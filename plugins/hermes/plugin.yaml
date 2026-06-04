@@ -1,5 +1,5 @@
 name: greprules
-version: "0.2.1"
+version: "0.2.2"
 description: "Fetch greprules.io rule packs, run OpenGrep scans, and inject compact SAST findings into Hermes turns."
 author: "provally"
 hooks:
