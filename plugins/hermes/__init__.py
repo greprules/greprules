@@ -65,7 +65,7 @@ def _run(args: Sequence[str], cwd: Path, timeout: int = 180) -> Tuple[int, str, 
             check=False,
         )
     except FileNotFoundError:
-        return 127, "", "greprules CLI not found; install it, put it on PATH, or set GREPRULES_CLI_PATH"
+        return 127, "", "greprules CLI wrapper not found; the plugin-bundled bin/greprules is missing and GREPRULES_CLI_PATH/PATH did not resolve an executable"
     except subprocess.TimeoutExpired as exc:
         out = exc.stdout if isinstance(exc.stdout, str) else ""
         err = exc.stderr if isinstance(exc.stderr, str) else ""

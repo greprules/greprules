@@ -7,6 +7,7 @@ Use this skill when the user asks to configure greprules for Claude Code or loca
 Rules:
 
 - Prefer `greprules config set` over editing config files directly.
+- When running from the Claude Code plugin, execute the plugin-bundled `bin/greprules` wrapper. Do not require `greprules` to be installed on shell `PATH`; in this file, `greprules ...` means the resolved wrapper command.
 - Use global config for machine/user preferences such as registry URL, OpenGrep mode, and OpenGrep executable path.
 - Use repo-local config only for settings that are specific to this checkout and should not be committed.
 - Do not write `opengrep.path` to shared `.greprules/config.yaml`.

@@ -10,7 +10,7 @@ When handling an automatic Stop hook result, read `.greprules/out/agent-result.j
 
 Workflow:
 
-1. Verify the CLI is available with `command -v greprules`.
+1. Resolve the greprules command from the installed plugin root and use its bundled `bin/greprules` wrapper. Do not require `greprules` to be installed on shell `PATH`; in this workflow, `greprules ...` means the resolved wrapper command.
 2. Run `greprules doctor --format json`.
 3. If `opengrep.active.ok` is false, use `/greprules:configure` or ask one concise question about the OpenGrep runtime choice before scanning.
 4. If `lock.exists` is false and `registry.ok` is true, run `greprules recommend --format json --agent --changed`.

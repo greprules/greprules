@@ -14,11 +14,13 @@ The repository root contains a small Hermes shim so `hermes plugins install` can
 
 ## CLI Runtime
 
-The plugin resolves the greprules CLI in this order:
+Hermes slash commands and hooks invoke the plugin-bundled `bin/greprules` wrapper by default. The wrapper is not expected to be on the user's shell `PATH`.
 
-1. `GREPRULES_CLI_PATH`
+The Hermes adapter resolves the command in this order:
+
+1. `GREPRULES_CLI_PATH` as an explicit local override
 2. bundled `bin/greprules` wrapper
-3. `greprules` on `PATH`
+3. `greprules` on `PATH` only as a fallback
 
 The bundled wrapper can download the configured greprules release into a user cache when a local binary is not available.
 

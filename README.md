@@ -281,7 +281,9 @@ GREPRULES_REGISTRY=http://127.0.0.1:8790 greprules doctor
 
 ## Plugin Runtime
 
-Agent plugins ship a `bin/greprules` wrapper. It resolves the real CLI in this order:
+Agent plugins ship a `bin/greprules` wrapper, not the native Go binary itself. Skills and hooks should invoke that bundled wrapper directly; `greprules` being absent from the user's shell `PATH` is not a plugin setup failure.
+
+The wrapper resolves the real CLI in this order:
 
 ```text
 GREPRULES_CLI_PATH

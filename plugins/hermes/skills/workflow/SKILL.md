@@ -4,6 +4,8 @@ description: Use greprules from Hermes slash commands and edited-file hooks
 
 Use this skill when the user wants Hermes to run greprules scans or understand greprules plugin behavior.
 
+Hermes slash commands and hooks resolve the greprules command through the plugin adapter. They use `GREPRULES_CLI_PATH` only as an explicit local override, otherwise the plugin-bundled `bin/greprules` wrapper, and only then `greprules` on shell `PATH` as a fallback. Do not treat a missing `command -v greprules` result as a Hermes plugin setup failure.
+
 Available slash commands:
 
 1. `/greprules doctor` checks registry access, rule-pack fetch state, and OpenGrep readiness.
@@ -16,6 +18,6 @@ Available slash commands:
 
 Aliases are also available: `/greprules-doctor`, `/greprules-scan-edited`, `/greprules-scan-working-tree`, `/greprules-scan-target <path>`, and `/greprules-scan-full`.
 
-When rule packs are not fetched yet, use agent-assisted selection: inspect the target files and run `greprules recommend --format json --agent` with `--target`, `--changed`, or `--targets-from` matching the scan scope. Choose only slugs present in `availablePacks`, fetch them with explicit `greprules fetch --pack <slug>` arguments, then rerun the scan.
+When rule packs are not fetched yet, use agent-assisted selection: inspect the target files and run `greprules recommend --format json --agent` with `--target`, `--changed`, or `--targets-from` matching the scan scope through the resolved plugin command. Choose only slugs present in `availablePacks`, fetch them with explicit `greprules fetch --pack <slug>` arguments, then rerun the scan.
 
 The `pre_llm_call` hook can inject compact edited-file scan results before the next model turn when `agent.autoScan=true`. Automatic scan context injection is disabled by default; use `/greprules configure auto-scan true` to enable it persistently while keeping manual commands available. `GREPRULES_HERMES_AUTO_SCAN=true` remains available as a one-session override.

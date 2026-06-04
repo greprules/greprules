@@ -9,7 +9,7 @@ This command requires at least one target path. If the user runs `/greprules:sca
 Workflow:
 
 1. Identify the target path or paths from the user's command. If none are provided, ask for the target.
-2. Verify the CLI is available with `command -v greprules`.
+2. Resolve the greprules command from the installed plugin root and use its bundled `bin/greprules` wrapper. Do not require `greprules` to be installed on shell `PATH`; in this workflow, `greprules ...` means the resolved wrapper command.
 3. Run `greprules doctor --format json`.
 4. If `opengrep.active.ok` is false, use `/greprules:configure` or ask one concise question about the OpenGrep runtime choice before scanning.
 5. If `lock.exists` is false and `registry.ok` is true, run `greprules recommend --format json --agent --target <path>` for each requested path.

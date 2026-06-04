@@ -61,10 +61,12 @@ For a one-session override, set `GREPRULES_AUTO_SCAN=true` or `GREPRULES_TRACK_E
 
 ## CLI Resolution
 
-The plugin resolves the greprules CLI in this order:
+Codex skills and hooks invoke the plugin-bundled `bin/greprules` wrapper. Codex does not add that wrapper to the user's shell `PATH`, so `command -v greprules` may be empty even when the plugin is installed correctly.
+
+The bundled wrapper resolves the real CLI in this order:
 
 1. `GREPRULES_CLI_PATH`
-2. bundled `bin/greprules` wrapper
-3. `greprules` on `PATH`
+2. `greprules` on `PATH`, excluding the wrapper itself
+3. GitHub Release bootstrap into the greprules user cache
 
-The bundled wrapper can download the configured greprules release into the user cache when a local binary is not available.
+The release bootstrap downloads the configured greprules CLI into the user cache when a local binary is not available.

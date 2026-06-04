@@ -10,6 +10,7 @@ Use this skill when the user asks Codex to configure greprules, choose an OpenGr
 Rules:
 
 - Prefer `greprules config set` over editing config files directly.
+- When running from the Codex plugin, execute the plugin-bundled `bin/greprules` wrapper. Do not require `greprules` to be installed on shell `PATH`; in this file, `greprules ...` means the resolved wrapper command.
 - Persist OpenGrep runtime selection with `--global` unless the user asks for repository-local settings.
 - Do not write machine-specific `opengrep.path` to shared `.greprules/config.yaml`.
 - OpenGrep default rules are disabled by default with `opengrep.includeDefaultRules=false`; only enable them if the user explicitly asks to include OpenGrep's default auto-selected rules.

@@ -9,7 +9,7 @@ Use this skill when the user asks Codex to check greprules readiness, diagnose g
 
 Workflow:
 
-1. Verify the CLI is available with `command -v greprules`.
+1. Resolve the greprules command from the installed plugin root and use its bundled `bin/greprules` wrapper. Do not require `greprules` to be installed on shell `PATH`; `command -v greprules` may be empty in a valid plugin install. In this workflow, `greprules ...` means the resolved wrapper command.
 2. Check Codex plugin and hook trust state before interpreting scan readiness:
    - Read `${CODEX_HOME:-$HOME/.codex}/config.toml`.
    - Confirm `[plugins."greprules@greprules"] enabled = true`.
