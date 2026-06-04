@@ -1,0 +1,235 @@
+#!/usr/bin/env bash
+set -u
+
+GREPRULES_VERSION="${GREPRULES_VERSION:-v0.1.6}"
+GREPRULES_REPO="${GREPRULES_REPO:-greprules/greprules}"
+SELF_PATH="${BASH_SOURCE[0]}"
+SELF_DIR="$(CDPATH= cd -- "$(dirname -- "$SELF_PATH")" && pwd)"
+
+if [[ -n "${GREPRULES_CLI_PATH:-}" && -f "${GREPRULES_CLI_PATH}" && -x "${GREPRULES_CLI_PATH}" ]]; then
+  exec "${GREPRULES_CLI_PATH}" "$@"
+fi
+
+SELF_REAL="$(cd "$SELF_DIR" && pwd -P)/$(basename "$SELF_PATH")"
+IFS=':' read -r -a PATH_DIRS <<< "${PATH:-}"
+for DIR in "${PATH_DIRS[@]}"; do
+  [[ -z "$DIR" ]] && continue
+  DIR_REAL="$(cd "$DIR" 2>/dev/null && pwd -P || true)"
+  [[ -z "$DIR_REAL" ]] && continue
+  [[ "$DIR_REAL" == "$SELF_DIR" ]] && continue
+  CANDIDATE="$DIR/greprules"
+  if [[ -f "$CANDIDATE" && -x "$CANDIDATE" ]]; then
+    CANDIDATE_REAL="$(cd "$(dirname "$CANDIDATE")" && pwd -P)/$(basename "$CANDIDATE")"
+    [[ "$CANDIDATE_REAL" == "$SELF_REAL" ]] && continue
+    exec "$CANDIDATE" "$@"
+  fi
+done
+
+platform_os() {
+  case "$(uname -s)" in
+    Darwin) printf 'darwin' ;;
+    Linux) printf 'linux' ;;
+    MINGW*|MSYS*|CYGWIN*) printf 'windows' ;;
+    *) return 1 ;;
+  esac
+}
+
+platform_arch() {
+  case "$(uname -m)" in
+    arm64|aarch64) printf 'arm64' ;;
+    x86_64|amd64) printf 'amd64' ;;
+    *) return 1 ;;
+  esac
+}
+
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+    return
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{print $1}'
+    return
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$1" <<'PY'
+import hashlib
+import sys
+
+h = hashlib.sha256()
+with open(sys.argv[1], "rb") as handle:
+    for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+        h.update(chunk)
+print(h.hexdigest())
+PY
+    return
+  fi
+  return 1
+}
+
+download_file() {
+  local url="$1"
+  local destination="$2"
+  local token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+  if command -v curl >/dev/null 2>&1; then
+    if [[ -n "$token" ]]; then
+      curl -fsSL -H "Authorization: Bearer ${token}" "$url" -o "$destination"
+    else
+      curl -fsSL "$url" -o "$destination"
+    fi
+    return
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    GH_DOWNLOAD_TOKEN="$token" python3 - "$url" "$destination" <<'PY'
+import os
+import sys
+import urllib.request
+
+url, destination = sys.argv[1], sys.argv[2]
+request = urllib.request.Request(url)
+token = os.environ.get("GH_DOWNLOAD_TOKEN")
+if token:
+    request.add_header("Authorization", f"Bearer {token}")
+with urllib.request.urlopen(request, timeout=120) as response:
+    data = response.read()
+with open(destination, "wb") as handle:
+    handle.write(data)
+PY
+    return
+  fi
+  return 1
+}
+
+plugin_cache_dir() {
+  if [[ -n "${GREPRULES_PLUGIN_CACHE_DIR:-}" ]]; then
+    printf '%s' "$GREPRULES_PLUGIN_CACHE_DIR"
+    return
+  fi
+
+  case "$(uname -s)" in
+    Darwin)
+      [[ -n "${HOME:-}" ]] || return 1
+      printf '%s' "${HOME}/Library/Caches/greprules/plugins/codex"
+      ;;
+    Linux)
+      if [[ -n "${XDG_CACHE_HOME:-}" ]]; then
+        printf '%s' "${XDG_CACHE_HOME}/greprules/plugins/codex"
+      elif [[ -n "${HOME:-}" ]]; then
+        printf '%s' "${HOME}/.cache/greprules/plugins/codex"
+      else
+        printf '%s' "${TMPDIR:-/tmp}/greprules/plugins/codex"
+      fi
+      ;;
+    MINGW*|MSYS*|CYGWIN*)
+      local base="${LOCALAPPDATA:-}"
+      if [[ -z "$base" && -n "${HOME:-}" ]]; then
+        base="${HOME}/AppData/Local"
+      fi
+      [[ -n "$base" ]] || return 1
+      if command -v cygpath >/dev/null 2>&1; then
+        base="$(cygpath -u "$base")"
+      fi
+      printf '%s' "${base}/greprules/plugins/codex"
+      ;;
+    *)
+      printf '%s' "${TMPDIR:-/tmp}/greprules/plugins/codex"
+      ;;
+  esac
+}
+
+bootstrap_managed_binary() {
+  local cache_dir os arch ext archive asset_url checksum_url version_dir tmp_dir archive_path checksums_path expected actual
+  cache_dir="$(plugin_cache_dir)" || return 1
+  os="$(platform_os)" || return 1
+  arch="$(platform_arch)" || return 1
+  local archive_version="${GREPRULES_VERSION#v}"
+  ext="tar.gz"
+  if [[ "$os" == "windows" ]]; then
+    ext="zip"
+  fi
+
+  version_dir="${cache_dir}/greprules/${GREPRULES_VERSION}"
+  mkdir -p "$version_dir" || return 1
+
+  local managed_binary="${version_dir}/greprules"
+  if [[ "$os" == "windows" ]]; then
+    managed_binary="${version_dir}/greprules.exe"
+  fi
+  if [[ -f "$managed_binary" && -x "$managed_binary" ]]; then
+    exec "$managed_binary" "$@"
+  fi
+
+  archive="greprules_${archive_version}_${os}_${arch}.${ext}"
+  asset_url="https://github.com/${GREPRULES_REPO}/releases/download/${GREPRULES_VERSION}/${archive}"
+  checksum_url="https://github.com/${GREPRULES_REPO}/releases/download/${GREPRULES_VERSION}/checksums.txt"
+  tmp_dir="$(mktemp -d)"
+  archive_path="${tmp_dir}/${archive}"
+  checksums_path="${tmp_dir}/checksums.txt"
+
+  if ! download_file "$checksum_url" "$checksums_path"; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+  if ! download_file "$asset_url" "$archive_path"; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  expected="$(awk -v file="$archive" '$2 == file {print $1}' "$checksums_path" | head -n 1)"
+  actual="$(sha256_file "$archive_path")"
+  if [[ -z "$expected" || -z "$actual" || "$expected" != "$actual" ]]; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  rm -rf "${tmp_dir}/extract"
+  mkdir -p "${tmp_dir}/extract"
+  if [[ "$ext" == "zip" ]]; then
+    if ! command -v unzip >/dev/null 2>&1; then
+      rm -rf "$tmp_dir"
+      return 1
+    fi
+    unzip -q "$archive_path" -d "${tmp_dir}/extract" || {
+      rm -rf "$tmp_dir"
+      return 1
+    }
+  else
+    tar -xzf "$archive_path" -C "${tmp_dir}/extract" || {
+      rm -rf "$tmp_dir"
+      return 1
+    }
+  fi
+
+  local extracted="${tmp_dir}/extract/greprules"
+  if [[ "$os" == "windows" ]]; then
+    extracted="${tmp_dir}/extract/greprules.exe"
+  fi
+  if [[ ! -f "$extracted" ]]; then
+    rm -rf "$tmp_dir"
+    return 1
+  fi
+
+  mv "$extracted" "$managed_binary" || {
+    rm -rf "$tmp_dir"
+    return 1
+  }
+  chmod +x "$managed_binary" 2>/dev/null || true
+  printf '%s  %s\n' "$actual" "$(basename "$managed_binary")" > "${version_dir}/checksums.txt" 2>/dev/null || true
+  rm -rf "$tmp_dir"
+  exec "$managed_binary" "$@"
+}
+
+if bootstrap_managed_binary "$@"; then
+  exit 0
+fi
+
+cat >&2 <<EOF
+greprules CLI not found and managed bootstrap failed.
+
+Install or build greprules, then either:
+  - put it on PATH, or
+  - set GREPRULES_CLI_PATH=/absolute/path/to/greprules, or
+  - allow the plugin to download ${GREPRULES_REPO} ${GREPRULES_VERSION}, or
+  - set GREPRULES_PLUGIN_CACHE_DIR to a writable cache directory.
+EOF
+exit 127

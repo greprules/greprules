@@ -1,0 +1,40 @@
+{
+  "name": "greprules",
+  "version": "0.1.6",
+  "description": "Fetch greprules.io rule packs, run OpenGrep scans, and keep Codex editing sessions aware of SAST findings.",
+  "author": {
+    "name": "greprules",
+    "url": "https://greprules.io"
+  },
+  "homepage": "https://greprules.io",
+  "repository": "https://github.com/greprules/greprules",
+  "license": "Apache-2.0",
+  "keywords": [
+    "sast",
+    "opengrep",
+    "semgrep",
+    "security",
+    "rules",
+    "codex"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "greprules",
+    "shortDescription": "Agent-assisted OpenGrep scans with greprules.io rule packs",
+    "longDescription": "greprules lets Codex select rule packs from project context, fetch them from greprules.io, run OpenGrep scans, and review compact SAST findings before finishing coding turns.",
+    "developerName": "greprules",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Interactive"
+    ],
+    "websiteURL": "https://greprules.io",
+    "defaultPrompt": [
+      "Scan my latest code edits with greprules.",
+      "Configure greprules for this repository."
+    ],
+    "brandColor": "#111111"
+  }
+}

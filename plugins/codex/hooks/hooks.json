@@ -1,0 +1,39 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/greprules-hook.py\" doctor",
+            "statusMessage": "Checking greprules readiness"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "apply_patch|functions\\.apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/greprules-hook.py\" mark-dirty",
+            "statusMessage": "Tracking greprules scan targets"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${PLUGIN_ROOT}/scripts/greprules-hook.py\" scan-if-dirty",
+            "statusMessage": "Running greprules edited-file scan"
+          }
+        ]
+      }
+    ]
+  }
+}

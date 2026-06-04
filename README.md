@@ -2,7 +2,7 @@
 
 Agent plugin for fetching trusted SAST rule packs from greprules.io and scanning local code changes with OpenGrep.
 
-greprules is designed for local coding agents first. The Claude Code and Hermes plugins give agents slash commands for checking setup, configuring OpenGrep, selecting rule packs from code context, fetching those packs, and scanning local code changes. The Go CLI is the deterministic local runtime behind those commands.
+greprules is designed for local coding agents first. The Claude Code, Codex, and Hermes plugins give agents commands or skills for checking setup, configuring OpenGrep, selecting rule packs from code context, fetching those packs, and scanning local code changes. The Go CLI is the deterministic local runtime behind those commands.
 
 ## Quick Start
 
@@ -25,9 +25,9 @@ Run these inside Claude Code:
 - Lets agents select reusable SAST rule packs from greprules.io based on target code context.
 - Fetches the selected packs reproducibly through the CLI.
 - Configures OpenGrep for local scans.
-- Tracks files edited by Claude Code.
+- Tracks files edited by local coding agents.
 - Scans changed files or explicit targets before the agent finishes.
-- Writes agent-readable results so Claude can review findings and suggest fixes.
+- Writes agent-readable results so the agent can review findings and suggest fixes.
 - Keeps source code local; the plugin fetches rules and runs OpenGrep on your machine.
 
 ## Claude Code Slash Commands
@@ -84,6 +84,29 @@ This disables the Stop hook scan and block. Edited-file tracking stays enabled, 
 ```bash
 export GREPRULES_TRACK_EDITED_FILES=false
 ```
+
+## Codex Plugin
+
+Install the Codex plugin marketplace from this repository:
+
+```bash
+codex plugin marketplace add greprules/greprules --sparse .agents/plugins --sparse plugins/codex
+```
+
+Then open `/plugins` in Codex and install or enable greprules. Open `/hooks` after enabling the plugin and trust the greprules hook entries.
+
+Codex skills:
+
+```text
+$greprules-doctor
+$greprules-configure
+$greprules-scan-edited
+$greprules-scan-working-tree
+$greprules-scan-target src/auth
+$greprules-scan-full
+```
+
+The Codex plugin uses `SessionStart`, `PostToolUse`, and `Stop` hooks. Its Stop hook can block the end of a turn and continue Codex with a compact prompt to review `.greprules/out/agent-result.json`, matching the Claude Code hard-gate behavior more closely than the Hermes soft-gate flow.
 
 ## Hermes Plugin
 
@@ -245,7 +268,7 @@ system PATH, excluding the plugin wrapper itself
 GitHub Release bootstrap into <user-cache-dir>/greprules/plugins/<provider>/greprules/<version>/greprules
 ```
 
-For plugin-specific details, see [`plugins/claude-code/README.md`](plugins/claude-code/README.md) and [`plugins/hermes/README.md`](plugins/hermes/README.md).
+For plugin-specific details, see [`plugins/claude-code/README.md`](plugins/claude-code/README.md), [`plugins/codex/README.md`](plugins/codex/README.md), and [`plugins/hermes/README.md`](plugins/hermes/README.md).
 
 ## Development
 
@@ -253,6 +276,7 @@ For plugin-specific details, see [`plugins/claude-code/README.md`](plugins/claud
 make test vet build
 claude plugin validate --strict /path/to/greprules
 claude plugin validate --strict /path/to/greprules/plugins/claude-code
+CODEX_HOME="$(mktemp -d)" codex plugin marketplace add /path/to/greprules
 ```
 
 To test a local CLI build before a release:

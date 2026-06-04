@@ -1,0 +1,20 @@
+{
+  "name": "greprules",
+  "interface": {
+    "displayName": "greprules"
+  },
+  "plugins": [
+    {
+      "name": "greprules",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
