@@ -95,6 +95,8 @@ codex plugin marketplace add greprules/greprules --sparse .agents/plugins --spar
 
 Then open `/plugins` in Codex and install or enable greprules. Open `/hooks` after enabling the plugin and trust the greprules hook entries.
 
+If greprules appears installed but automatic scans do not run, invoke `$greprules-doctor`. It checks whether the plugin is enabled and whether the `SessionStart`, `PostToolUse`, and `Stop` hook entries are trusted. Missing hook trust means the plugin is installed but the automatic edited-file scan flow is not active yet.
+
 Codex skills:
 
 ```text
@@ -106,7 +108,7 @@ $greprules-scan-target src/auth
 $greprules-scan-full
 ```
 
-The Codex plugin uses `SessionStart`, `PostToolUse`, and `Stop` hooks. Its Stop hook can block the end of a turn and continue Codex with a compact prompt to review `.greprules/out/agent-result.json`, matching the Claude Code hard-gate behavior more closely than the Hermes soft-gate flow.
+The Codex plugin uses `SessionStart`, `PostToolUse`, and `Stop` hooks. Clean scans finish without a follow-up prompt. When findings, warnings, errors, or rule-pack selection work need attention, the Stop hook continues Codex with instructions to keep the original development result as the primary response and append greprules review as a short secondary section.
 
 ## Hermes Plugin
 
@@ -289,7 +291,7 @@ export GREPRULES_CLI_PATH="$PWD/greprules"
 To override the plugin bootstrap release during testing:
 
 ```bash
-export GREPRULES_VERSION=v0.1.6
+export GREPRULES_VERSION=v0.2.0
 export GREPRULES_PLUGIN_CACHE_DIR=/tmp/greprules-plugin-cache
 ```
 

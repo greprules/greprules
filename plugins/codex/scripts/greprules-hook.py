@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -18,8 +19,15 @@ from typing import Any, Dict, Iterable, List, Optional
 
 DEFAULT_MIN_INTERVAL_SECONDS = 45
 DEFAULT_MAX_CHANGED_FILES = 100
+DEFAULT_LAST_MESSAGE_LIMIT = 6000
 PLUGIN_ROOT = Path(os.environ.get("PLUGIN_ROOT") or os.environ.get("CLAUDE_PLUGIN_ROOT", Path(__file__).resolve().parents[1])).resolve()
 WROTE_OUTPUT = False
+CODEX_HOOK_STATES = {
+    "session_start": "SessionStart",
+    "post_tool_use": "PostToolUse",
+    "stop": "Stop",
+}
+SCAN_COUNTS_RE = re.compile(r"findings=(\d+), warnings=(\d+), errors=(\d+)")
 
 
 def bool_env(name: str, default: bool = True) -> bool:
@@ -50,6 +58,59 @@ def state_dir(root: Path) -> Path:
     path = Path(override).expanduser() if override else root / ".greprules" / "plugin-data" / "agent"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def codex_config_path() -> Path:
+    raw_home = os.environ.get("CODEX_HOME", "").strip()
+    home = Path(raw_home).expanduser() if raw_home else Path.home() / ".codex"
+    return home / "config.toml"
+
+
+def codex_hook_warning() -> str:
+    path = codex_config_path()
+    if not path.exists():
+        return ""
+    try:
+        config = path.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+    plugin_section = config_section(config, '[plugins."greprules@greprules"]')
+    if "enabled = true" not in plugin_section:
+        return (
+            " Codex greprules plugin is not enabled in ~/.codex/config.toml, so automatic scans will not run. "
+            "Open /plugins, install or enable greprules, then start a new Codex session."
+        )
+    missing: List[str] = []
+    for key, label in CODEX_HOOK_STATES.items():
+        header = f'[hooks.state."greprules@greprules:hooks/hooks.json:{key}:0:0"]'
+        section = config_section(config, header)
+        if 'trusted_hash = "sha256:' not in section:
+            missing.append(label)
+    if not missing:
+        return ""
+    return (
+        " Codex greprules hooks are installed but not fully trusted; automatic scans may not run. "
+        "Missing trusted hooks: "
+        + ", ".join(missing)
+        + ". Open /hooks, trust the greprules hook entries, then start a new Codex session."
+    )
+
+
+def config_section(config: str, header: str) -> str:
+    lines = config.splitlines()
+    capture = False
+    out: List[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped == header:
+            capture = True
+            out.append(stripped)
+            continue
+        if capture and stripped.startswith("[") and stripped.endswith("]"):
+            break
+        if capture:
+            out.append(stripped)
+    return "\n".join(out)
 
 
 def greprules_bin() -> str:
@@ -108,6 +169,48 @@ def emit_block(message: str) -> None:
     message = message.strip()
     if message:
         write_hook_output({"decision": "block", "reason": message})
+
+
+def emit_greprules_review_block(scan_message: str, payload: Dict[str, Any]) -> None:
+    scan_message = scan_message.strip()
+    if not scan_message:
+        return
+    previous = string_from_any(first_present(payload, "last_assistant_message", "lastAssistantMessage")).strip()
+    if previous:
+        limit = int_env("GREPRULES_LAST_ASSISTANT_MESSAGE_LIMIT", DEFAULT_LAST_MESSAGE_LIMIT)
+        truncated = len(previous) > limit > 0
+        if limit > 0:
+            previous = previous[:limit]
+        previous_block = (
+            "\n\nPrevious assistant response to preserve as the main answer:\n"
+            "<previous_response>\n"
+            + previous
+            + ("\n[truncated]" if truncated else "")
+            + "\n</previous_response>"
+        )
+    else:
+        previous_block = ""
+    reason = (
+        "greprules finished an automatic edited-file scan that needs review.\n\n"
+        "Do not replace the user's main development result with greprules-only output. "
+        "Your final response must keep the original development-work summary as the primary answer, "
+        "then append a short `greprules` section as secondary context. "
+        "Read `.greprules/out/agent-result.json`, triage findings as true positive, false positive, or needs investigation, "
+        "and mention only actionable security or scan-quality issues. "
+        "If a likely true positive requires code changes, propose the fix or apply it only when that matches the user's request.\n\n"
+        "greprules scan summary:\n"
+        + scan_message
+        + previous_block
+    )
+    emit_block(reason)
+
+
+def scan_has_actionable_output(message: str) -> bool:
+    match = SCAN_COUNTS_RE.search(message)
+    if not match:
+        return True
+    findings, warnings, errors = (int(value) for value in match.groups())
+    return findings > 0 or warnings > 0 or errors > 0
 
 
 def log_msg(root: Path, message: str) -> None:
@@ -316,10 +419,13 @@ def scan_if_dirty(root: Path, payload: Dict[str, Any]) -> int:
             (state_dir(root) / "last-summary.txt").write_text(message + "\n", encoding="utf-8")
         except Exception:
             pass
-        emit_block(message)
+        if scan_has_actionable_output(message):
+            emit_greprules_review_block(message, payload)
+        else:
+            log_msg(root, "scan completed without actionable findings")
     elif status == "needs_pack_selection":
         log_msg(root, "agent pack selection required: " + message)
-        emit_block(message)
+        emit_greprules_review_block(message, payload)
     else:
         log_msg(root, "scan skipped or failed: " + message)
         emit_system_message(message, payload)
@@ -360,8 +466,12 @@ def doctor_context(root: Path) -> int:
     registry_ok = bool(nested(report, "registry", "ok"))
     lock_exists = bool(nested(report, "lock", "exists"))
     active_ok = bool(nested(report, "opengrep", "active", "ok"))
-    if registry_ok and active_ok:
+    hook_warning = codex_hook_warning()
+    if registry_ok and active_ok and not hook_warning:
         log_msg(root, "doctor ok")
+        return 0
+    if registry_ok and active_ok and hook_warning:
+        emit_system_message("greprules automatic scan hooks need attention." + hook_warning, {"hook_event_name": "SessionStart"})
         return 0
 
     setup_guidance = ""
@@ -391,7 +501,7 @@ def doctor_context(root: Path) -> int:
     message = (
         f"greprules needs attention before scans. Registry ready: {str(registry_ok).lower()}; "
         f"rule packs fetched: {str(lock_exists).lower()}; OpenGrep ready: {str(active_ok).lower()}; "
-        f"configured OpenGrep mode: {mode}. Recommended commands: {recommended}.{setup_guidance}{rule_pack_guidance}"
+        f"configured OpenGrep mode: {mode}. Recommended commands: {recommended}.{setup_guidance}{rule_pack_guidance}{hook_warning}"
     )
     emit_system_message(message, {"hook_event_name": "SessionStart"})
     return 0
