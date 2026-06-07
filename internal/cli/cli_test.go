@@ -314,6 +314,73 @@ fi
 	}
 }
 
+func TestRunScanUsesProvidedRootByDefaultInsideParentGitRepo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake runtime is unix-only")
+	}
+	parent := t.TempDir()
+	if err := exec.Command("git", "-C", parent, "init").Run(); err != nil {
+		t.Skipf("git init unavailable: %v", err)
+	}
+	root := filepath.Join(parent, "packages", "api")
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.test/api\n")
+	writeFile(t, filepath.Join(root, "app.mjs"), "console.log(1)\n")
+	configureAgentScanProject(t, root, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'opengrep 9.8.7\n'
+  exit 0
+fi
+out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output) shift; out="$1" ;;
+  esac
+  shift
+done
+printf '{"results":[]}\n' > "$out"
+`)
+
+	if err := runScan(t.Context(), []string{"--root", root, "--target", filepath.Join(root, "app.mjs"), "--sarif=false"}); err != nil {
+		t.Fatal(err)
+	}
+
+	assertFileExists(t, filepath.Join(root, ".greprules", "out", "agent-result.json"))
+	assertNoFile(t, filepath.Join(parent, ".greprules", "lock.json"))
+}
+
+func TestResolveCommandRootDiscoversGitRootOnlyForChangedMode(t *testing.T) {
+	parent := t.TempDir()
+	if err := exec.Command("git", "-C", parent, "init").Run(); err != nil {
+		t.Skipf("git init unavailable: %v", err)
+	}
+	child := filepath.Join(parent, "packages", "api")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	exact, err := resolveCommandRoot(child, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exact != child {
+		t.Fatalf("expected provided root by default, got %s", exact)
+	}
+	changedRoot, err := resolveCommandRoot(child, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realChangedRoot, err := filepath.EvalSymlinks(changedRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	realParent, err := filepath.EvalSymlinks(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if realChangedRoot != realParent {
+		t.Fatalf("expected git root for changed mode, got %s", changedRoot)
+	}
+}
+
 func TestRunScanPassesEachPackAsSeparateOpenGrepConfig(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script fake runtime is unix-only")

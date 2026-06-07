@@ -12,7 +12,8 @@ It uses structured CLI outputs:
 
 - `greprules config inspect --format json`
 - `greprules doctor --format json`
-- `.greprules/out/agent-result.json`
+- `.greprules/out/agent-result.json` for normal CLI scans
+- `.greprules/plugin-data/claude-code/sessions/<session-id>/out/agent-result.json` for edited-file plugin scans
 
 Skills:
 
@@ -26,12 +27,12 @@ Skills:
 Automatic hooks:
 
 - `SessionStart` runs `greprules doctor --format json` and reports registry or OpenGrep setup gaps. It does not install OpenGrep or scan. Missing rule packs are not reported as setup gaps because scan commands can fetch them automatically.
-- `PostToolUse` runs after Claude Code edits files with `Edit`, `MultiEdit`, `Write`, or `NotebookEdit`, captures edited file paths from the hook input, filters them to code and security-relevant config candidates, and marks the workspace dirty. It does not scan.
-- `Stop` attempts target-aware rule-pack selection for files Claude actually edited when `agent.autoScan=true`, fetches selected packs if needed, verifies OpenGrep readiness, runs one targeted scan, and blocks the stop once with a compact verification prompt. If deterministic pack selection is insufficient, it blocks with instructions for Claude to inspect available packs and choose explicit slugs. Automatic scan state is one-shot after a scan, terminal skip, or failure. It works in non-git directories.
-- Hook entries execute `scripts/greprules-hook.py`. The script handles Claude hook JSON and StopBlock output, then delegates state and scan work to the provider-neutral `greprules agent-state` and `greprules agent-scan` primitives.
+- `PostToolUse` runs after Claude Code edits files with `Edit`, `MultiEdit`, `Write`, or `NotebookEdit`, captures edited file paths from the hook input, filters them to code and security-relevant config candidates, and marks the current Claude session dirty. It does not scan.
+- `Stop` attempts target-aware rule-pack selection for files Claude actually edited when `agent.autoScan=true`, fetches selected packs if needed, verifies OpenGrep readiness, runs one targeted scan, and blocks the stop once with a compact verification prompt. If deterministic pack selection is insufficient, it blocks with instructions for Claude to inspect available packs and choose explicit slugs. A successful scan clears dirty state for that Claude session; readiness failures, pack-selection gaps, and too-many-target skips keep the dirty state for a later scan. It works in non-git directories.
+- Hook entries execute `scripts/greprules-hook.py`. The script handles Claude hook JSON, owns session-local edited-file state, and passes absolute explicit target lists to the provider-neutral `greprules agent-scan scan` primitive. Edited-file scans do not use git changed-file tracking; `/greprules:scan-working-tree` is the git-based scan path.
 - Automatic Stop hook scans are disabled by default. Set `greprules config set agent.autoScan true --global` to enable the automatic Stop hook scan and block persistently. Edited-file tracking stays enabled so `/greprules:scan-edited` can still be run manually; a successful manual edited-file scan clears the tracked state.
 - Set `greprules config set agent.trackEditedFiles false --global` only when you also want to disable edited-file tracking.
 - Tune automatic scans with `greprules config set agent.autoScanMinIntervalSeconds 45 --global` and `greprules config set agent.autoScanMaxChangedFiles 100 --global`.
 - `GREPRULES_AUTO_SCAN`, `GREPRULES_TRACK_EDITED_FILES`, `GREPRULES_AUTO_SCAN_MIN_INTERVAL_SECONDS`, and `GREPRULES_AUTO_SCAN_MAX_CHANGED_FILES` remain available as one-session overrides before starting Claude Code.
-- Hook state is written under the project `.greprules/plugin-data/agent` directory by default. Override with `GREPRULES_PLUGIN_STATE_DIR` only when needed.
+- Hook state is written under the project `.greprules/plugin-data/claude-code/sessions/<session-id>/` directory by default. Override the provider state root with `GREPRULES_PLUGIN_STATE_DIR` only when needed.
 - User config and caches are intentionally not removed by Claude Code plugin uninstall. Use `greprules cleanup --config --plugin-cache --dry-run` to inspect cleanup targets.

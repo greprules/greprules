@@ -1,13 +1,14 @@
 package cli
 
 import (
+	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/greprules/greprules/internal/agentstate"
 	"github.com/greprules/greprules/internal/config"
 )
 
@@ -19,13 +20,23 @@ func setupAgentPluginTestEnv(t *testing.T) (string, string) {
 	return root, state
 }
 
-func markAgentDirty(t *testing.T, root string, stateDir string, path string) {
+func withStdout(t *testing.T, buffer *bytes.Buffer, fn func()) {
 	t.Helper()
-	state, err := agentstate.New(root, stateDir)
+	original := os.Stdout
+	reader, writer, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := state.MarkDirty([]string{path}); err != nil {
+	os.Stdout = writer
+	defer func() {
+		os.Stdout = original
+		_ = reader.Close()
+	}()
+	fn()
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(buffer, reader); err != nil {
 		t.Fatal(err)
 	}
 }

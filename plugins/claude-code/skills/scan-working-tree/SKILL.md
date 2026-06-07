@@ -6,7 +6,7 @@ Use this skill when the user asks for `/greprules:scan-working-tree` or wants to
 
 This command means `greprules scan --changed`: files changed against `HEAD`, staged files, and untracked files. It does not mean "last commit".
 
-When handling an automatic Stop hook result, read `.greprules/out/agent-result.json` and any relevant project context needed to classify each finding, then report reasoning only. Do not edit code, add suppressions, chase zero findings, or rerun greprules unless the user explicitly asks.
+When handling an automatic Stop hook result, read the `Full result:` path reported in the scan summary and any relevant project context needed to classify each finding, then report reasoning only. Do not edit code, add suppressions, chase zero findings, or rerun greprules unless the user explicitly asks.
 
 Workflow:
 

@@ -53,6 +53,14 @@ func Detect(root string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	return DetectExact(root)
+}
+
+func DetectExact(root string) (Result, error) {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return Result{}, err
+	}
 	acc := newAccumulator(root)
 	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -83,6 +91,17 @@ func DetectTargets(root string, rawTargets []string) (Result, error) {
 		return Detect(root)
 	}
 	root, err := FindRepoRoot(root)
+	if err != nil {
+		return Result{}, err
+	}
+	return DetectTargetsExact(root, rawTargets)
+}
+
+func DetectTargetsExact(root string, rawTargets []string) (Result, error) {
+	if len(rawTargets) == 0 {
+		return DetectExact(root)
+	}
+	root, err := filepath.Abs(root)
 	if err != nil {
 		return Result{}, err
 	}

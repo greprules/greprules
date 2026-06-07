@@ -21,6 +21,11 @@ type AgentResult struct {
 	Errors        []string   `json:"errors,omitempty"`
 }
 
+type SummaryOptions struct {
+	Automatic bool
+	Label     string
+}
+
 type RepoInfo struct {
 	Root         string   `json:"root"`
 	ChangedMode  bool     `json:"changedMode"`
@@ -175,4 +180,58 @@ func WriteAgentResult(path string, result AgentResult) error {
 	}
 	data = append(data, '\n')
 	return os.WriteFile(path, data, 0o644)
+}
+
+func SummarizeAgentResult(path string, options SummaryOptions) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Sprintf("greprules scan finished. Full result: %s", path)
+	}
+	var result AgentResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return fmt.Sprintf("greprules scan finished. Full result: %s", path)
+	}
+	scanLabel := options.Label
+	if scanLabel == "" {
+		scanLabel = "edited-file"
+		if result.Repo.ChangedMode {
+			scanLabel = "changed-file"
+		}
+	}
+	prefix := "greprules "
+	if options.Automatic {
+		prefix += "automatic "
+	}
+	lines := []string{
+		fmt.Sprintf(
+			"%s%s scan completed: status=%s, findings=%d, warnings=%d, errors=%d, targets=%d.",
+			prefix,
+			scanLabel,
+			fallbackString(result.Status, "unknown"),
+			len(result.Findings),
+			len(result.Warnings),
+			len(result.Errors),
+			len(result.Scan.Targets),
+		),
+	}
+	if len(result.Findings) == 0 {
+		if options.Automatic {
+			lines = append(lines, "No OpenGrep findings were reported for the current automatic scan.")
+		} else {
+			lines = append(lines, "No OpenGrep findings were reported for this scan.")
+		}
+	} else if options.Automatic {
+		lines = append(lines, "Review "+path+" and classify each finding as true positive, false positive, or needs investigation. Report findings and reasoning only. Do not edit code, add suppressions, chase zero findings, or rerun greprules unless the user explicitly asks.")
+	} else {
+		lines = append(lines, "Review "+path+" and classify each finding as true positive, false positive, or needs investigation. Report findings and reasoning only unless the user asks for fixes.")
+	}
+	lines = append(lines, "Full result: "+path)
+	return strings.Join(lines, "\n")
+}
+
+func fallbackString(value string, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }

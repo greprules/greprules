@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -25,6 +26,131 @@ _DEFAULT_MIN_INTERVAL_SECONDS = 45
 _DEFAULT_MAX_CHANGED_FILES = 100
 _RECENT_ROOTS: Dict[str, Set[str]] = {}
 _LOCK = threading.Lock()
+_SAFE_SESSION_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_IGNORED_DIRS = {
+    ".cache",
+    ".git",
+    ".greprules",
+    ".hg",
+    ".next",
+    ".nuxt",
+    ".svn",
+    ".turbo",
+    ".venv",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "target",
+    "vendor",
+    "venv",
+}
+_SCAN_FILENAMES = {
+    ".dockerignore",
+    ".npmrc",
+    "brewfile",
+    "cargo.lock",
+    "cargo.toml",
+    "composer.json",
+    "composer.lock",
+    "containerfile",
+    "dockerfile",
+    "gemfile",
+    "gemfile.lock",
+    "go.mod",
+    "go.sum",
+    "jenkinsfile",
+    "makefile",
+    "package-lock.json",
+    "package.json",
+    "pipfile",
+    "pipfile.lock",
+    "pnpm-lock.yaml",
+    "podfile",
+    "poetry.lock",
+    "pom.xml",
+    "pyproject.toml",
+    "rakefile",
+    "requirements.txt",
+    "settings.gradle",
+    "settings.gradle.kts",
+    "tsconfig.json",
+    "yarn.lock",
+}
+_SCAN_EXTENSIONS = {
+    ".bash",
+    ".c",
+    ".cc",
+    ".cfg",
+    ".clj",
+    ".cljs",
+    ".conf",
+    ".cpp",
+    ".cs",
+    ".cxx",
+    ".dart",
+    ".ex",
+    ".exs",
+    ".fs",
+    ".go",
+    ".gql",
+    ".gradle",
+    ".graphql",
+    ".groovy",
+    ".h",
+    ".hcl",
+    ".hh",
+    ".hpp",
+    ".hrl",
+    ".hs",
+    ".htm",
+    ".html",
+    ".hxx",
+    ".ini",
+    ".java",
+    ".js",
+    ".json",
+    ".jsx",
+    ".kt",
+    ".kts",
+    ".lua",
+    ".m",
+    ".mjs",
+    ".ml",
+    ".mli",
+    ".mm",
+    ".nim",
+    ".php",
+    ".phtml",
+    ".pl",
+    ".pm",
+    ".properties",
+    ".proto",
+    ".ps1",
+    ".py",
+    ".pyw",
+    ".r",
+    ".rb",
+    ".rego",
+    ".rs",
+    ".scala",
+    ".sh",
+    ".sol",
+    ".sql",
+    ".svelte",
+    ".swift",
+    ".tf",
+    ".tfvars",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".vue",
+    ".xml",
+    ".yaml",
+    ".yml",
+    ".zig",
+    ".zsh",
+}
 
 
 def _bool_env(name: str, default: bool = True) -> bool:
@@ -148,15 +274,44 @@ def _state_dir(root: Path) -> Path:
     return path
 
 
-def _dirty_marker_path(root: Path) -> Path:
-    return _state_dir(root) / "dirty"
+def _safe_session_key(value: str) -> str:
+    safe = _SAFE_SESSION_RE.sub("-", value.strip())[:120].strip(".-")
+    return safe or ""
 
 
-def _last_scan_path(root: Path) -> Path:
-    return _state_dir(root) / "last-scan"
+def _tracker_key(session_id: str, task_id: str = "") -> str:
+    return _safe_session_key(task_id or session_id or "")
 
 
-def _last_scan_recent(root: Path, agent: Dict[str, Any]) -> bool:
+def _session_state_dir(root: Path, session_key: str) -> Optional[Path]:
+    if not session_key:
+        return None
+    path = _state_dir(root) / "sessions" / session_key
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _dirty_files_path(session_dir: Path) -> Path:
+    return session_dir / "dirty-files"
+
+
+def _scan_targets_path(session_dir: Path) -> Path:
+    return session_dir / "scan-targets.txt"
+
+
+def _last_scan_path(session_dir: Path) -> Path:
+    return session_dir / "last-scan"
+
+
+def _last_summary_path(session_dir: Path) -> Path:
+    return session_dir / "last-summary.txt"
+
+
+def _output_dir(session_dir: Path) -> Path:
+    return session_dir / "out"
+
+
+def _last_scan_recent(session_dir: Path, agent: Dict[str, Any]) -> bool:
     min_interval = _agent_int(
         agent,
         "autoScanMinIntervalSeconds",
@@ -167,30 +322,26 @@ def _last_scan_recent(root: Path, agent: Dict[str, Any]) -> bool:
     if min_interval <= 0:
         return False
     try:
-        last = int(_last_scan_path(root).read_text().strip())
+        last = int(_last_scan_path(session_dir).read_text().strip())
     except Exception:
         return False
     return int(time.time()) - last < min_interval
 
 
-def _tracker_key(session_id: str, task_id: str = "") -> str:
-    return task_id or session_id or "default"
-
-
 def _remember_root(root: Path, session_id: str, task_id: str = "") -> None:
     key = _tracker_key(session_id, task_id)
+    if not key:
+        return
     with _LOCK:
         _RECENT_ROOTS.setdefault(key, set()).add(str(root))
 
 
-def _roots_for_turn(cwd: Path, session_id: str) -> List[Path]:
-    roots: Set[str] = {str(_git_root(cwd))}
+def _roots_for_turn(cwd: Path, session_id: str, task_id: str = "") -> List[Path]:
+    roots: Set[str] = {str(cwd)}
+    key = _tracker_key(session_id, task_id)
     with _LOCK:
-        if session_id:
-            roots.update(_RECENT_ROOTS.get(session_id, set()))
-        for key, values in _RECENT_ROOTS.items():
-            if key != session_id:
-                roots.update(values)
+        if key:
+            roots.update(_RECENT_ROOTS.get(key, set()))
     return [Path(root) for root in sorted(roots)]
 
 
@@ -209,33 +360,107 @@ def _extract_path_candidates(tool_name: str, args: Any) -> Set[str]:
     return candidates
 
 
+def _is_scan_candidate(rel: str) -> bool:
+    parts = rel.replace("\\", "/").split("/")
+    if any(part in _IGNORED_DIRS for part in parts):
+        return False
+    name = parts[-1].lower() if parts else ""
+    if name in _SCAN_FILENAMES or name.startswith("dockerfile."):
+        return True
+    return Path(name).suffix in _SCAN_EXTENSIONS
+
+
+def _normalize_existing_path(root: Path, base_dir: Path, raw: str) -> str:
+    candidate = raw.strip()
+    if not candidate:
+        return ""
+    path = Path(candidate).expanduser()
+    if not path.is_absolute():
+        path = base_dir / path
+    try:
+        absolute = path.resolve(strict=True)
+        resolved_root = root.resolve(strict=True)
+    except Exception:
+        return ""
+    try:
+        rel = absolute.relative_to(resolved_root)
+    except ValueError:
+        return ""
+    if absolute.is_dir():
+        return ""
+    rel_text = rel.as_posix()
+    return str(absolute) if rel_text and _is_scan_candidate(rel_text) else ""
+
+
+def _normalize_candidates(root: Path, base_dir: Path, paths: Iterable[str]) -> List[str]:
+    seen: Set[str] = set()
+    files: List[str] = []
+    for raw in paths:
+        if not isinstance(raw, str):
+            continue
+        rel = _normalize_existing_path(root, base_dir, raw)
+        if rel and rel not in seen:
+            seen.add(rel)
+            files.append(rel)
+    return sorted(files)
+
+
+def _read_lines(path: Path) -> List[str]:
+    try:
+        return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except FileNotFoundError:
+        return []
+
+
+def _write_lines(path: Path, lines: Iterable[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    values = sorted({line.strip() for line in lines if line.strip()})
+    tmp = Path(str(path) + ".tmp")
+    tmp.write_text("".join(line + "\n" for line in values), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _append_dirty_files(session_dir: Path, files: Iterable[str]) -> List[str]:
+    merged = set(_read_lines(_dirty_files_path(session_dir)))
+    merged.update(line for line in files if line)
+    _write_lines(_dirty_files_path(session_dir), merged)
+    return sorted(merged)
+
+
+def _prepare_scan_targets(root: Path, session_dir: Path) -> List[str]:
+    targets = _normalize_candidates(root, root, _read_lines(_dirty_files_path(session_dir)))
+    _write_lines(_scan_targets_path(session_dir), targets)
+    return targets
+
+
+def _clear_dirty(session_dir: Path) -> None:
+    for path in (_dirty_files_path(session_dir), _scan_targets_path(session_dir)):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _record_scan_attempt(session_dir: Path) -> None:
+    try:
+        _last_scan_path(session_dir).write_text(str(int(time.time())) + "\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _mark_dirty_paths(paths: Iterable[str], cwd: Path, session_id: str, task_id: str = "") -> None:
-    root = _git_root(cwd)
+    root = cwd
     path_list = [path for path in paths if path]
     if not path_list:
         return
-    command = [
-        "agent-state",
-        "mark-dirty",
-        "--root",
-        str(root),
-        "--state-dir",
-        str(_state_dir(root)),
-        "--cwd",
-        str(cwd),
-    ]
-    for path in path_list:
-        command.extend(["--path", path])
-    code, out, err = _run(command, root)
-    if code != 0:
-        logger.debug("greprules agent-state mark-dirty failed: %s", err or out)
+    key = _tracker_key(session_id, task_id)
+    session_dir = _session_state_dir(root, key)
+    if session_dir is None:
+        logger.debug("greprules dirty tracking skipped; Hermes session_id/task_id is not available")
         return
-    try:
-        payload = json.loads(out)
-    except json.JSONDecodeError:
-        logger.debug("greprules agent-state mark-dirty returned non-JSON: %s", out)
-        return
-    if payload.get("marked"):
+    files = _normalize_candidates(root, cwd, path_list)
+    if files:
+        _append_dirty_files(session_dir, files)
         _remember_root(root, session_id, task_id)
 
 
@@ -256,46 +481,97 @@ def _recommended(report: Dict[str, Any]) -> str:
     return "greprules doctor --format json"
 
 
-def _scan_dirty(root: Path, *, auto: bool) -> Optional[str]:
+def _too_many_targets_message(count: int, limit: int, auto: bool) -> str:
+    prefix = "automatic " if auto else ""
+    return (
+        f"greprules {prefix}edited-file scan skipped because {count} edited files exceed the automatic limit ({limit}). "
+        "Run /greprules scan-edited or /greprules scan-working-tree when ready."
+    )
+
+
+def _scan_dirty(root: Path, session_key: str, *, auto: bool) -> Optional[str]:
+    session_dir = _session_state_dir(root, session_key)
+    if session_dir is None:
+        return None
     agent = _agent_config(root)
     if auto and not _agent_bool(agent, "autoScan", False, "GREPRULES_HERMES_AUTO_SCAN", "GREPRULES_AUTO_SCAN"):
         return None
-    if auto and _last_scan_recent(root, agent):
+    if auto and _last_scan_recent(session_dir, agent):
         return None
-    if not _dirty_marker_path(root).exists():
+    if not _read_lines(_dirty_files_path(session_dir)):
         return None
+    targets = _prepare_scan_targets(root, session_dir)
+    if not targets:
+        _clear_dirty(session_dir)
+        return None
+    limit = (
+        _agent_int(
+            agent,
+            "autoScanMaxChangedFiles",
+            _DEFAULT_MAX_CHANGED_FILES,
+            "GREPRULES_HERMES_AUTO_SCAN_MAX_CHANGED_FILES",
+            "GREPRULES_AUTO_SCAN_MAX_CHANGED_FILES",
+        )
+        if auto
+        else 0
+    )
+    if limit > 0 and len(targets) > limit:
+        return _too_many_targets_message(len(targets), limit, auto)
     command = [
         "agent-scan",
-        "edited",
+        "scan",
         "--root",
         str(root),
-        "--state-dir",
-        str(_state_dir(root)),
         "--label",
         "edited-file",
+        "--targets-from",
+        str(_scan_targets_path(session_dir)),
+        "--output-dir",
+        str(_output_dir(session_dir)),
+        "--format",
+        "json",
     ]
     if auto:
-        command.extend(
-            [
-                "--automatic",
-                "--max-targets",
-                str(
-                    _agent_int(
-                        agent,
-                        "autoScanMaxChangedFiles",
-                        _DEFAULT_MAX_CHANGED_FILES,
-                        "GREPRULES_HERMES_AUTO_SCAN_MAX_CHANGED_FILES",
-                        "GREPRULES_AUTO_SCAN_MAX_CHANGED_FILES",
-                    )
-                ),
-                "--too-many-suggestion",
-                "Run /greprules scan-edited or /greprules scan-working-tree when ready.",
-            ]
-        )
+        command.append("--automatic")
     code, out, err = _run(command, root, timeout=900)
     if code != 0:
         return "greprules edited-file scan failed: " + (err or out or "unknown scan failure").strip()
-    return out.strip() or None
+    try:
+        payload = json.loads(out)
+    except json.JSONDecodeError:
+        return "greprules edited-file scan failed: could not parse agent-scan output"
+    if not isinstance(payload, dict):
+        return None
+    message = str(payload.get("message") or "").strip()
+    if payload.get("status") == "scanned":
+        if message:
+            try:
+                _last_summary_path(session_dir).write_text(message + "\n", encoding="utf-8")
+            except Exception:
+                pass
+        _record_scan_attempt(session_dir)
+        _clear_dirty(session_dir)
+    return message or None
+
+
+def _dirty_session_dirs(root: Path) -> List[Path]:
+    sessions_root = _state_dir(root) / "sessions"
+    if not sessions_root.is_dir():
+        return []
+    sessions: List[Path] = []
+    for child in sessions_root.iterdir():
+        if child.is_dir() and _read_lines(_dirty_files_path(child)):
+            sessions.append(child)
+    return sorted(sessions)
+
+
+def _scan_edited(root: Path) -> Optional[str]:
+    sessions = _dirty_session_dirs(root)
+    if len(sessions) == 0:
+        return None
+    if len(sessions) > 1:
+        return "multiple Hermes sessions have dirty files; start a session-scoped scan or run /greprules scan-target for explicit files"
+    return _scan_dirty(root, sessions[0].name, auto=False)
 
 
 def _scan_with_args(root: Path, args: Sequence[str], label: str) -> str:
@@ -443,7 +719,7 @@ def _handle_greprules(raw_args: str = "") -> str:
     except ValueError as exc:
         return f"could not parse arguments: {exc}"
     cwd = _current_cwd({})
-    root = _git_root(cwd)
+    root = cwd
     if not argv or argv[0] in {"help", "-h", "--help"}:
         return _help()
     sub = argv[0]
@@ -459,9 +735,9 @@ def _handle_greprules(raw_args: str = "") -> str:
         code, out, err = _run(args, root, timeout=600)
         return (out or err or "greprules fetch finished").strip() if code == 0 else "greprules fetch failed: " + (err or out).strip()
     if sub == "scan-edited":
-        return _scan_dirty(root, auto=False) or "no Hermes-edited files are tracked; edit files or run /greprules scan-working-tree"
+        return _scan_edited(root) or "no Hermes-edited files are tracked; edit files or run /greprules scan-working-tree"
     if sub == "scan-working-tree":
-        return _scan_with_args(root, ["--changed"], "working-tree")
+        return _scan_with_args(_git_root(cwd), ["--changed"], "working-tree")
     if sub == "scan-full":
         return _scan_with_args(root, ["--full"], "full-repository")
     if sub == "scan-target":
@@ -492,17 +768,18 @@ def _on_post_tool_call(
     if not candidates:
         return
     cwd = _current_cwd(kwargs)
-    root = _git_root(cwd)
+    root = cwd
     agent = _agent_config(root)
     if not _agent_bool(agent, "trackEditedFiles", True, "GREPRULES_HERMES_TRACK_EDITED_FILES", "GREPRULES_TRACK_EDITED_FILES"):
         return
     _mark_dirty_paths(candidates, cwd, session_id, task_id)
 
 
-def _on_pre_llm_call(session_id: str = "", **kwargs: Any) -> Optional[Dict[str, str]]:
+def _on_pre_llm_call(session_id: str = "", task_id: str = "", **kwargs: Any) -> Optional[Dict[str, str]]:
     contexts = []
-    for root in _roots_for_turn(_current_cwd(kwargs), session_id):
-        message = _scan_dirty(root, auto=True)
+    key = _tracker_key(session_id, task_id)
+    for root in _roots_for_turn(_current_cwd(kwargs), session_id, task_id):
+        message = _scan_dirty(root, key, auto=True)
         if message:
             contexts.append(message)
     if not contexts:

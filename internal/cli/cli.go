@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/greprules/greprules/internal/agentstate"
 	"github.com/greprules/greprules/internal/archive"
 	"github.com/greprules/greprules/internal/config"
 	"github.com/greprules/greprules/internal/detect"
@@ -73,12 +72,8 @@ func Execute(args []string, version string) int {
 		err = runSetupOpenGrep(ctx, args[1:])
 	case "scan":
 		err = runScan(ctx, args[1:])
-	case "scan-edited":
-		err = runScanEdited(ctx, args[1:])
 	case "doctor":
 		err = runDoctor(ctx, args[1:])
-	case "agent-state":
-		err = runAgentState(args[1:])
 	case "agent-scan":
 		err = runAgentScan(ctx, args[1:])
 	case "cleanup", "uninstall":
@@ -104,8 +99,7 @@ Usage:
   greprules recommend [--agent] [--changed|--target PATH|--targets-from FILE]
   greprules fetch [--pack PACK|--changed|--target PATH|--targets-from FILE]
   greprules setup-opengrep [--version latest]
-  greprules scan [--changed|--full|--target PATH|--targets-from FILE] [--engine managed|system|path]
-  greprules scan-edited [--engine managed|system|path]
+  greprules scan [--changed|--full|--target PATH|--targets-from FILE] [--output-dir DIR] [--engine managed|system|path]
   greprules doctor [--debug] [--engine managed|system|path]
   greprules cleanup [--config|--cache|--opengrep|--plugin-cache|--repo|--all] [--dry-run]`)
 }
@@ -348,7 +342,7 @@ func runRecommend(ctx context.Context, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	root, err := detect.FindRepoRoot(*rootFlag)
+	root, err := resolveCommandRoot(*rootFlag, *changed)
 	if err != nil {
 		return err
 	}
@@ -408,11 +402,21 @@ func collectTargetInputs(root string, targets []string, targetsFrom string, chan
 	return rawTargets, nil
 }
 
+func resolveCommandRoot(rootFlag string, discoverGitRoot bool) (string, error) {
+	if discoverGitRoot {
+		return detect.FindRepoRoot(rootFlag)
+	}
+	if rootFlag == "" {
+		rootFlag = "."
+	}
+	return filepath.Abs(rootFlag)
+}
+
 func detectForTargets(root string, rawTargets []string) (detect.Result, error) {
 	if len(rawTargets) > 0 {
-		return detect.DetectTargets(root, rawTargets)
+		return detect.DetectTargetsExact(root, rawTargets)
 	}
-	return detect.Detect(root)
+	return detect.DetectExact(root)
 }
 
 type fetchCommandOptions struct {
@@ -439,7 +443,7 @@ func runFetchWithOptions(ctx context.Context, args []string, options fetchComman
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	root, err := detect.FindRepoRoot(*rootFlag)
+	root, err := resolveCommandRoot(*rootFlag, *changed)
 	if err != nil {
 		return err
 	}
@@ -600,70 +604,23 @@ func runScan(ctx context.Context, args []string) error {
 	return runScanWithOptions(ctx, args, scanCommandOptions{stdout: os.Stdout, stderr: os.Stderr})
 }
 
-func runScanEdited(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("scan-edited", flag.ContinueOnError)
-	rootFlag := fs.String("root", ".", "repo root or child path")
-	stateDir := fs.String("state-dir", "", "agent state directory")
-	sarif := fs.Bool("sarif", true, "write SARIF output")
-	engineMode := fs.String("engine", "", "OpenGrep engine mode override: managed, system, or path")
-	opengrepPath := fs.String("opengrep-path", "", "OpenGrep binary path override")
-	opengrepVersion := fs.String("opengrep-version", "", "managed OpenGrep version override")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	root, err := detect.FindRepoRoot(*rootFlag)
-	if err != nil {
-		return err
-	}
-	state, err := scanEditedState(root, *stateDir)
-	if err != nil {
-		return err
-	}
-	outcome, err := runAgentEditedScan(ctx, agentEditedScanOptions{
-		Root:            root,
-		State:           state,
-		Label:           "edited-file",
-		Automatic:       false,
-		MaxTargets:      0,
-		Sarif:           *sarif,
-		EngineMode:      *engineMode,
-		OpenGrepPath:    *opengrepPath,
-		OpenGrepVersion: *opengrepVersion,
-		Messages:        defaultAgentScanMessages(false, "edited-file"),
-	})
-	if err != nil {
-		return err
-	}
-	if outcome.Message == "" {
-		return errors.New("no agent-edited files are tracked; edit files with an agent plugin or run greprules scan --changed")
-	}
-	if outcome.Status != "scanned" {
-		return errors.New(outcome.Message)
-	}
-	fmt.Fprintln(os.Stdout, outcome.Message)
-	return nil
-}
-
-func scanEditedState(root string, stateDir string) (agentstate.State, error) {
-	return agentstate.New(root, stateDir)
-}
-
 func runScanWithOptions(ctx context.Context, args []string, options scanCommandOptions) error {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	rootFlag := fs.String("root", ".", "repo root or child path")
-	changed := fs.Bool("changed", true, "scan changed files")
+	changed := fs.Bool("changed", false, "scan changed files")
 	full := fs.Bool("full", false, "scan full repo")
 	sarif := fs.Bool("sarif", true, "write SARIF output")
 	engineMode := fs.String("engine", "", "OpenGrep engine mode override: managed, system, or path")
 	opengrepPath := fs.String("opengrep-path", "", "OpenGrep binary path override")
 	opengrepVersion := fs.String("opengrep-version", "", "managed OpenGrep version override")
 	targetsFrom := fs.String("targets-from", "", "newline-delimited file of scan targets relative to root")
+	outputDir := fs.String("output-dir", "", "scan output directory override")
 	var targetFlags stringList
 	fs.Var(&targetFlags, "target", "explicit scan target path, repeatable or comma-separated")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	root, err := detect.FindRepoRoot(*rootFlag)
+	root, err := resolveCommandRoot(*rootFlag, *changed)
 	if err != nil {
 		return err
 	}
@@ -680,6 +637,7 @@ func runScanWithOptions(ctx context.Context, args []string, options scanCommandO
 		OpenGrepVersion: *opengrepVersion,
 		Targets:         []string(targetFlags),
 		TargetsFrom:     *targetsFrom,
+		OutputDir:       *outputDir,
 		Quiet:           options.quiet,
 		Stdout:          options.stdout,
 		Stderr:          options.stderr,

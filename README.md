@@ -87,6 +87,8 @@ greprules config set agent.trackEditedFiles false --global
 
 For a one-session override, set `GREPRULES_AUTO_SCAN=true` or `GREPRULES_TRACK_EDITED_FILES=false` before starting the agent.
 
+Edited-file state is owned by each plugin adapter and isolated by agent session under `.greprules/plugin-data/<provider>/sessions/<session-id>/`. Edited-file scans are driven by the adapter's edit hooks: adapters pass absolute explicit target lists to the provider-neutral CLI scan primitive. CLI commands use the provided `--root` as-is by default; git root discovery is reserved for `/greprules:scan-working-tree` and CLI `--changed` scans.
+
 ## Codex Plugin
 
 Install the Codex plugin marketplace from this repository:
@@ -180,9 +182,10 @@ The important files are:
 .greprules/lock.json
 .greprules/out/agent-result.json
 .greprules/out/scan.sarif
+.greprules/plugin-data/<provider>/sessions/<session-id>/out/agent-result.json
 ```
 
-Claude reads `.greprules/out/agent-result.json`. It contains the scan summary, findings, warnings, selected OpenGrep runtime, and rule pack metadata. `.greprules/lock.json` pins fetched pack artifacts and records the selected scan runtime.
+Normal CLI scans write `.greprules/out/agent-result.json`. Plugin edited-file scans write session-local results under `.greprules/plugin-data/<provider>/sessions/<session-id>/out/agent-result.json`; agents should read the full result path reported in the scan summary. The agent result contains the scan summary, findings, warnings, selected OpenGrep runtime, and rule pack metadata. `.greprules/lock.json` pins fetched pack artifacts and records the selected scan runtime.
 
 Generated local paths are ignored automatically in git repositories:
 
@@ -203,7 +206,6 @@ The CLI is useful when you want the same scan behavior outside Claude Code.
 greprules doctor
 greprules init --mode auto
 greprules fetch
-greprules scan-edited
 greprules scan --changed
 ```
 

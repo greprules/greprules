@@ -7,13 +7,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/greprules/greprules/internal/agentstate"
-	"github.com/greprules/greprules/internal/detect"
 	"github.com/greprules/greprules/internal/doctor"
+	"github.com/greprules/greprules/internal/output"
 )
 
 type agentScanOutcome struct {
@@ -30,23 +28,6 @@ type agentScanMessageOptions struct {
 	ReadinessFailedPrefix string
 	ScanFailedPrefix      string
 	ReadyCommandFallback  string
-	TooManyMessage        func(count int, limit int) string
-}
-
-type agentEditedScanOptions struct {
-	Root                string
-	State               agentstate.State
-	Label               string
-	Automatic           bool
-	MaxTargets          int
-	Sarif               bool
-	EngineMode          string
-	OpenGrepPath        string
-	OpenGrepVersion     string
-	LastSummaryPath     string
-	ClearOnHandledError bool
-	Messages            agentScanMessageOptions
-	Logf                func(format string, args ...any)
 }
 
 type agentDirectScanOptions struct {
@@ -54,6 +35,7 @@ type agentDirectScanOptions struct {
 	Label           string
 	Automatic       bool
 	ScanArgs        []string
+	OutputDir       string
 	EngineMode      string
 	OpenGrepPath    string
 	OpenGrepVersion string
@@ -62,11 +44,9 @@ type agentDirectScanOptions struct {
 
 func runAgentScan(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: greprules agent-scan edited|scan")
+		return errors.New("usage: greprules agent-scan scan")
 	}
 	switch args[0] {
-	case "edited":
-		return runAgentScanEdited(ctx, args[1:])
 	case "scan":
 		return runAgentScanDirect(ctx, args[1:])
 	default:
@@ -74,67 +54,11 @@ func runAgentScan(ctx context.Context, args []string) error {
 	}
 }
 
-func runAgentScanEdited(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("agent-scan edited", flag.ContinueOnError)
-	rootFlag := fs.String("root", ".", "repo root or child path")
-	stateDir := fs.String("state-dir", "", "agent state directory")
-	label := fs.String("label", "edited-file", "scan label for compact summary")
-	automatic := fs.Bool("automatic", false, "use automatic scan wording")
-	maxTargets := fs.Int("max-targets", 0, "maximum edited targets before skipping; 0 disables the limit")
-	tooManySuggestion := fs.String("too-many-suggestion", "", "guidance appended when edited targets exceed the limit")
-	tooManyMessage := fs.String("too-many-message", "", "full message template for too many edited targets; supports {count} and {limit}")
-	sarif := fs.Bool("sarif", true, "write SARIF output")
-	format := fs.String("format", "text", "output format: text or json")
-	engineMode := fs.String("engine", "", "OpenGrep engine mode override: managed, system, or path")
-	opengrepPath := fs.String("opengrep-path", "", "OpenGrep binary path override")
-	opengrepVersion := fs.String("opengrep-version", "", "managed OpenGrep version override")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	root, err := detect.FindRepoRoot(*rootFlag)
-	if err != nil {
-		return err
-	}
-	state, err := agentstate.New(root, *stateDir)
-	if err != nil {
-		return err
-	}
-	messages := defaultAgentScanMessages(*automatic, *label)
-	messages.TooManyMessage = func(count int, limit int) string {
-		if strings.TrimSpace(*tooManyMessage) != "" {
-			return strings.NewReplacer(
-				"{count}", fmt.Sprint(count),
-				"{limit}", fmt.Sprint(limit),
-			).Replace(*tooManyMessage)
-		}
-		message := fmt.Sprintf("greprules %sedited-file scan skipped because %d edited files exceed the automatic limit (%d).", automaticPrefix(*automatic), count, limit)
-		if strings.TrimSpace(*tooManySuggestion) != "" {
-			message += " " + strings.TrimSpace(*tooManySuggestion)
-		}
-		return message
-	}
-	outcome, err := runAgentEditedScan(ctx, agentEditedScanOptions{
-		Root:            root,
-		State:           state,
-		Label:           *label,
-		Automatic:       *automatic,
-		MaxTargets:      *maxTargets,
-		Sarif:           *sarif,
-		EngineMode:      *engineMode,
-		OpenGrepPath:    *opengrepPath,
-		OpenGrepVersion: *opengrepVersion,
-		Messages:        messages,
-	})
-	if err != nil {
-		return err
-	}
-	return printAgentScanOutcome(outcome, *format)
-}
-
 func runAgentScanDirect(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("agent-scan scan", flag.ContinueOnError)
 	rootFlag := fs.String("root", ".", "repo root or child path")
 	label := fs.String("label", "scan", "scan label for compact summary")
+	automatic := fs.Bool("automatic", false, "use automatic scan wording")
 	changed := fs.Bool("changed", false, "scan changed files")
 	full := fs.Bool("full", false, "scan full repo")
 	sarif := fs.Bool("sarif", true, "write SARIF output")
@@ -142,12 +66,14 @@ func runAgentScanDirect(ctx context.Context, args []string) error {
 	engineMode := fs.String("engine", "", "OpenGrep engine mode override: managed, system, or path")
 	opengrepPath := fs.String("opengrep-path", "", "OpenGrep binary path override")
 	opengrepVersion := fs.String("opengrep-version", "", "managed OpenGrep version override")
+	targetsFrom := fs.String("targets-from", "", "newline-delimited file of scan targets relative to root")
+	outputDir := fs.String("output-dir", "", "scan output directory override")
 	var targets stringList
 	fs.Var(&targets, "target", "explicit scan target path, repeatable or comma-separated")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	root, err := detect.FindRepoRoot(*rootFlag)
+	root, err := resolveCommandRoot(*rootFlag, *changed)
 	if err != nil {
 		return err
 	}
@@ -160,17 +86,25 @@ func runAgentScanDirect(ctx context.Context, args []string) error {
 	for _, target := range targets {
 		scanArgs = append(scanArgs, "--target", target)
 	}
+	if *targetsFrom != "" {
+		scanArgs = append(scanArgs, "--targets-from", *targetsFrom)
+	}
+	if *outputDir != "" {
+		scanArgs = append(scanArgs, "--output-dir", *outputDir)
+	}
 	if !*sarif {
 		scanArgs = append(scanArgs, "--sarif=false")
 	}
 	outcome, err := runAgentDirectScan(ctx, agentDirectScanOptions{
 		Root:            root,
 		Label:           *label,
+		Automatic:       *automatic,
 		ScanArgs:        scanArgs,
+		OutputDir:       *outputDir,
 		EngineMode:      *engineMode,
 		OpenGrepPath:    *opengrepPath,
 		OpenGrepVersion: *opengrepVersion,
-		Messages:        defaultAgentScanMessages(false, *label),
+		Messages:        defaultAgentScanMessages(*automatic, *label),
 	})
 	if err != nil {
 		return err
@@ -196,81 +130,12 @@ func printAgentScanOutcome(outcome agentScanOutcome, format string) error {
 	return nil
 }
 
-func runAgentEditedScan(ctx context.Context, options agentEditedScanOptions) (agentScanOutcome, error) {
-	if options.Label == "" {
-		options.Label = "edited-file"
-	}
-	if options.Messages.DoctorFailedPrefix == "" {
-		options.Messages = defaultAgentScanMessages(options.Automatic, options.Label)
-	}
-	if _, err := os.Stat(options.State.DirtyMarkerPath()); err != nil {
-		if os.IsNotExist(err) {
-			logAgentScan(options.Logf, "scan skipped; no dirty marker")
-			return agentScanOutcome{Status: "skipped"}, nil
-		}
-		return agentScanOutcome{}, err
-	}
-	targets, err := options.State.PrepareScanTargets()
-	if err != nil {
-		return agentScanOutcome{}, err
-	}
-	if len(targets) == 0 {
-		options.State.ClearDirtyState()
-		logAgentScan(options.Logf, "scan skipped; no edited files captured")
-		return agentScanOutcome{Status: "skipped"}, nil
-	}
-	if options.MaxTargets > 0 && len(targets) > options.MaxTargets {
-		options.State.ClearDirtyState()
-		options.State.RecordScanAttempt()
-		message := defaultTooManyEditedTargetsMessage(options.Automatic, len(targets), options.MaxTargets, "")
-		if options.Messages.TooManyMessage != nil {
-			message = options.Messages.TooManyMessage(len(targets), options.MaxTargets)
-		}
-		return agentScanOutcome{
-			Status:      "skipped",
-			Message:     message,
-			Targets:     targets,
-			TargetsPath: options.State.ScanTargetsPath(),
-		}, nil
-	}
-	scanArgs := []string{"--root", options.Root, "--targets-from", options.State.ScanTargetsPath()}
-	if !options.Sarif {
-		scanArgs = append(scanArgs, "--sarif=false")
-	}
-	outcome, err := runAgentScanAfterReadiness(ctx, agentDirectScanOptions{
-		Root:            options.Root,
-		Label:           options.Label,
-		Automatic:       options.Automatic,
-		ScanArgs:        scanArgs,
-		EngineMode:      options.EngineMode,
-		OpenGrepPath:    options.OpenGrepPath,
-		OpenGrepVersion: options.OpenGrepVersion,
-		Messages:        options.Messages,
-	})
-	outcome.Targets = targets
-	outcome.TargetsPath = options.State.ScanTargetsPath()
-	if err != nil {
-		return outcome, err
-	}
-	if outcome.Status == "scanned" {
-		if options.LastSummaryPath != "" {
-			_ = os.WriteFile(options.LastSummaryPath, []byte(outcome.Message+"\n"), 0o644)
-		}
-		options.State.RecordScanAttempt()
-		options.State.ClearDirtyState()
-	} else if outcome.Message != "" && options.ClearOnHandledError {
-		options.State.RecordScanAttempt()
-		options.State.ClearDirtyState()
-	}
-	return outcome, nil
-}
-
 func runAgentDirectScan(ctx context.Context, options agentDirectScanOptions) (agentScanOutcome, error) {
 	if options.Label == "" {
 		options.Label = "scan"
 	}
 	if options.Messages.DoctorFailedPrefix == "" {
-		options.Messages = defaultAgentScanMessages(false, options.Label)
+		options.Messages = defaultAgentScanMessages(options.Automatic, options.Label)
 	}
 	return runAgentScanAfterReadiness(ctx, options)
 }
@@ -336,11 +201,21 @@ func runAgentScanAfterReadiness(ctx context.Context, options agentDirectScanOpti
 		message := strings.TrimSpace(scanOutput.String() + "\nerror: " + err.Error())
 		return agentScanOutcome{Status: "failed", Message: options.Messages.ScanFailedPrefix + message}, nil
 	}
-	summary := agentstate.SummarizeAgentResult(
-		filepath.Join(options.Root, ".greprules", "out", "agent-result.json"),
-		agentstate.SummaryOptions{Automatic: options.Automatic, Label: options.Label},
+	summary := output.SummarizeAgentResult(
+		agentResultPath(options.Root, options.OutputDir),
+		output.SummaryOptions{Automatic: options.Automatic, Label: options.Label},
 	)
 	return agentScanOutcome{Status: "scanned", Message: summary, Summary: summary}, nil
+}
+
+func agentResultPath(root string, outputDir string) string {
+	if outputDir == "" {
+		outputDir = filepath.Join(".greprules", "out")
+	}
+	if !filepath.IsAbs(outputDir) {
+		outputDir = filepath.Join(root, outputDir)
+	}
+	return filepath.Join(outputDir, "agent-result.json")
 }
 
 func fetchArgsForAgentScan(root string, scanArgs []string) []string {
@@ -358,7 +233,7 @@ func fetchArgsForAgentScan(root string, scanArgs []string) []string {
 			index++
 		case strings.HasPrefix(arg, "--targets-from="):
 			args = append(args, arg)
-		case arg == "--changed" || strings.HasPrefix(arg, "--changed="):
+		case changedFlagEnabled(arg):
 			args = append(args, arg)
 		}
 	}
@@ -380,11 +255,24 @@ func agentPackSelectionMessage(root string, scanArgs []string) string {
 			index++
 		case strings.HasPrefix(arg, "--targets-from="):
 			recommendArgs = append(recommendArgs, arg)
-		case arg == "--changed" || strings.HasPrefix(arg, "--changed="):
+		case changedFlagEnabled(arg):
 			recommendArgs = append(recommendArgs, arg)
 		}
 	}
-	return "greprules needs agent-assisted rule-pack selection before scanning. Run `" + strings.Join(recommendArgs, " ") + "`, inspect detection, targets, availablePacks, and candidates, choose explicit pack slugs that match the scan target, run `greprules fetch --pack <slug>` for the chosen packs, then rerun the greprules scan. Do not invent pack slugs."
+	fetchArgs := []string{"greprules", "fetch", "--root", root, "--pack", "<slug>"}
+	return "greprules needs agent-assisted rule-pack selection before scanning. Run `" + strings.Join(recommendArgs, " ") + "`, inspect detection, targets, availablePacks, and candidates, choose explicit pack slugs that match the scan target, run `" + strings.Join(fetchArgs, " ") + "` for each chosen pack, then rerun the greprules scan. Do not invent pack slugs."
+}
+
+func changedFlagEnabled(arg string) bool {
+	if arg == "--changed" {
+		return true
+	}
+	value, ok := strings.CutPrefix(arg, "--changed=")
+	if !ok {
+		return false
+	}
+	value = strings.ToLower(strings.TrimSpace(value))
+	return value == "1" || value == "true" || value == "t" || value == "yes" || value == "y"
 }
 
 func defaultAgentScanMessages(automatic bool, label string) agentScanMessageOptions {
@@ -399,18 +287,7 @@ func defaultAgentScanMessages(automatic bool, label string) agentScanMessageOpti
 		ReadinessFailedPrefix: prefix + " skipped because OpenGrep is not ready. Recommended commands: ",
 		ScanFailedPrefix:      prefix + " failed: ",
 		ReadyCommandFallback:  "greprules setup-opengrep",
-		TooManyMessage: func(count int, limit int) string {
-			return defaultTooManyEditedTargetsMessage(automatic, count, limit, "")
-		},
 	}
-}
-
-func defaultTooManyEditedTargetsMessage(automatic bool, count int, limit int, suggestion string) string {
-	message := fmt.Sprintf("greprules %sedited-file scan skipped because %d edited files exceed the automatic limit (%d).", automaticPrefix(automatic), count, limit)
-	if strings.TrimSpace(suggestion) != "" {
-		message += " " + strings.TrimSpace(suggestion)
-	}
-	return message
 }
 
 func automaticPrefix(automatic bool) string {
@@ -418,10 +295,4 @@ func automaticPrefix(automatic bool) string {
 		return "automatic "
 	}
 	return ""
-}
-
-func logAgentScan(logf func(format string, args ...any), format string, args ...any) {
-	if logf != nil {
-		logf(format, args...)
-	}
 }

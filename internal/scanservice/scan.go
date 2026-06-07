@@ -30,6 +30,7 @@ type Options struct {
 	OpenGrepVersion string
 	Targets         []string
 	TargetsFrom     string
+	OutputDir       string
 	Quiet           bool
 	Stdout          io.Writer
 	Stderr          io.Writer
@@ -55,7 +56,11 @@ func Run(ctx context.Context, options Options) error {
 	if err := config.SaveLock(options.Root, lock); err != nil {
 		return err
 	}
-	outputDir := projectpath.AbsFromRoot(options.Root, cfg.OutputDir)
+	configuredOutputDir := cfg.OutputDir
+	if options.OutputDir != "" {
+		configuredOutputDir = options.OutputDir
+	}
+	outputDir := projectpath.AbsFromRoot(options.Root, configuredOutputDir)
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return err
 	}
