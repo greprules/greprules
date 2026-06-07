@@ -314,7 +314,7 @@ export GREPRULES_CLI_PATH="$PWD/greprules"
 To override the plugin bootstrap release during testing:
 
 ```bash
-export GREPRULES_VERSION=v0.2.2
+export GREPRULES_VERSION=v0.2.3
 export GREPRULES_PLUGIN_CACHE_DIR=/tmp/greprules-plugin-cache
 ```
 

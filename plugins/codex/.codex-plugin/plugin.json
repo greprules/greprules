@@ -1,6 +1,6 @@
 {
   "name": "greprules",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Fetch greprules.io rule packs, run OpenGrep scans, and keep Codex editing sessions aware of SAST findings.",
   "author": {
     "name": "greprules",
