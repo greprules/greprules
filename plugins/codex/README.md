@@ -10,7 +10,7 @@ Install the greprules marketplace from this repository:
 codex plugin marketplace add greprules/greprules --sparse .agents/plugins --sparse plugins/codex
 ```
 
-Then open `/plugins` in Codex, choose the greprules marketplace, and install or enable the greprules plugin.
+Then install or enable the greprules plugin from Codex's plugin directory. In the Codex desktop app, open **Plugins** from the app UI. In the Codex CLI TUI, start `codex` and run `/plugins`.
 
 For local development from a checkout:
 
@@ -18,7 +18,7 @@ For local development from a checkout:
 codex plugin marketplace add /absolute/path/to/greprules
 ```
 
-Codex requires hook review before non-managed command hooks run. Open `/hooks` after enabling the plugin and trust the greprules hook entries.
+Codex requires hook review before non-managed command hooks run. Review and trust the greprules hook entries if Codex prompts for hook review. In the Codex CLI TUI, use `/hooks`.
 
 If automatic scans are enabled but edited-file scans do not run, use `$greprules-doctor`. It checks whether the plugin is enabled and whether the `SessionStart`, `PostToolUse`, and `Stop` hook entries have been trusted in Codex. Missing hook trust means greprules is installed but the automatic scan flow is not active yet.
 
@@ -43,7 +43,7 @@ The same skills can also be selected implicitly when the user asks Codex to conf
 - `PostToolUse` tracks files Codex edited through `apply_patch`/file-edit tools under `.greprules/plugin-data/codex/sessions/<session-id>/`.
 - `Stop` scans the tracked edited files for the current Codex session once when `agent.autoScan=true`. The adapter passes absolute explicit targets; edited-file scans do not use git changed-file tracking. A clean scan is allowed to finish without a follow-up prompt. If findings, warnings, errors, or rule-pack selection work need attention, it continues Codex with instructions to keep the original development result as the primary response and append greprules review as a short secondary section.
 
-If only some hooks are trusted, `SessionStart` can warn that automatic scans are not fully active. If `SessionStart` itself is not trusted, Codex will not run the warning hook; open `/hooks` and trust all greprules entries.
+If only some hooks are trusted, `SessionStart` can warn that automatic scans are not fully active. If `SessionStart` itself is not trusted, Codex will not run the warning hook; review hook trust in Codex and trust all greprules entries.
 
 Automatic scans are disabled by default. Enable the automatic Stop hook scan persistently:
 
