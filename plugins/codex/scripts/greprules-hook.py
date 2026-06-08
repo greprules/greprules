@@ -21,6 +21,12 @@ from typing import Any, Dict, Iterable, List, Optional
 DEFAULT_MIN_INTERVAL_SECONDS = 45
 DEFAULT_MAX_CHANGED_FILES = 100
 DEFAULT_LAST_MESSAGE_LIMIT = 6000
+DEFAULT_AGENT_SETTINGS = {
+    "autoScan": False,
+    "trackEditedFiles": True,
+    "autoScanMinIntervalSeconds": DEFAULT_MIN_INTERVAL_SECONDS,
+    "autoScanMaxChangedFiles": DEFAULT_MAX_CHANGED_FILES,
+}
 PLUGIN_ROOT = Path(os.environ.get("PLUGIN_ROOT") or os.environ.get("CLAUDE_PLUGIN_ROOT", Path(__file__).resolve().parents[1])).resolve()
 WROTE_OUTPUT = False
 CODEX_HOOK_STATES = {
@@ -292,45 +298,47 @@ def run_cli(args: Iterable[str], root: Path, timeout: int = 900) -> subprocess.C
     )
 
 
-def agent_config(root: Path) -> Dict[str, Any]:
-    proc = run_cli(["config", "inspect", "--root", str(root), "--format", "json"], root, timeout=60)
-    if proc.returncode != 0:
-        log_msg(root, "config inspect failed: " + (proc.stderr or proc.stdout).strip())
-        return {}
+def agent_settings_path() -> Path:
+    override = os.environ.get("GREPRULES_CODEX_SETTINGS_PATH", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return codex_config_path().parent / "plugins" / "greprules" / "settings.json"
+
+
+def agent_settings(root: Path) -> Dict[str, Any]:
+    settings = dict(DEFAULT_AGENT_SETTINGS)
+    path = agent_settings_path()
+    if not path.exists():
+        return settings
     try:
-        resolution = json.loads(proc.stdout)
+        loaded = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        log_msg(root, "config inspect returned non-JSON: " + proc.stdout.strip())
-        return {}
-    config = resolution.get("config") if isinstance(resolution, dict) else {}
-    agent = config.get("agent") if isinstance(config, dict) else {}
-    return agent if isinstance(agent, dict) else {}
+        log_msg(root, "agent settings returned non-JSON: " + str(path))
+        return settings
+    except Exception as exc:
+        log_msg(root, "agent settings could not be read: " + str(exc))
+        return settings
+    if not isinstance(loaded, dict):
+        return settings
+    for key in ("autoScan", "trackEditedFiles"):
+        value = loaded.get(key)
+        if isinstance(value, bool):
+            settings[key] = value
+    for key in ("autoScanMinIntervalSeconds", "autoScanMaxChangedFiles"):
+        value = loaded.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            settings[key] = value
+    return settings
 
 
-def agent_bool(agent: Dict[str, Any], key: str, default: bool, *env_names: str) -> bool:
+def agent_bool(agent: Dict[str, Any], key: str, default: bool) -> bool:
     value = agent.get(key, default)
-    parsed = value if isinstance(value, bool) else default
-    for env_name in env_names:
-        raw = os.environ.get(env_name, "").strip().lower()
-        if raw:
-            return raw not in {"0", "false", "no", "off"}
-    return parsed
+    return value if isinstance(value, bool) else default
 
 
-def agent_int(agent: Dict[str, Any], key: str, default: int, *env_names: str) -> int:
+def agent_int(agent: Dict[str, Any], key: str, default: int) -> int:
     value = agent.get(key, default)
-    parsed = value if isinstance(value, int) and value >= 0 else default
-    for env_name in env_names:
-        raw = os.environ.get(env_name, "").strip()
-        if not raw:
-            continue
-        try:
-            override = int(raw)
-        except ValueError:
-            continue
-        if override >= 0:
-            return override
-    return parsed
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else default
 
 
 def read_hook_input() -> Dict[str, Any]:
@@ -592,8 +600,8 @@ def record_scan_attempt(session_dir: Path) -> None:
 
 
 def mark_dirty(root: Path, payload: Dict[str, Any]) -> int:
-    agent = agent_config(root)
-    if not agent_bool(agent, "trackEditedFiles", True, "GREPRULES_TRACK_EDITED_FILES"):
+    agent = agent_settings(root)
+    if not agent_bool(agent, "trackEditedFiles", True):
         log_msg(root, "edited file tracking disabled")
         return 0
     if not root.is_dir():
@@ -618,7 +626,7 @@ def mark_dirty(root: Path, payload: Dict[str, Any]) -> int:
 
 
 def last_scan_recent(session_dir: Path, agent: Dict[str, Any]) -> bool:
-    min_interval = agent_int(agent, "autoScanMinIntervalSeconds", DEFAULT_MIN_INTERVAL_SECONDS, "GREPRULES_AUTO_SCAN_MIN_INTERVAL_SECONDS")
+    min_interval = agent_int(agent, "autoScanMinIntervalSeconds", DEFAULT_MIN_INTERVAL_SECONDS)
     if min_interval <= 0:
         return False
     try:
@@ -637,7 +645,7 @@ def too_many_targets_message(count: int, limit: int, automatic: bool) -> str:
 
 
 def scan_session(root: Path, session_dir: Path, payload: Dict[str, Any], *, automatic: bool) -> Optional[Dict[str, Any]]:
-    agent = agent_config(root)
+    agent = agent_settings(root)
     if not root.is_dir():
         log_msg(root, f"scan skipped because project dir is not available: {root}")
         return {"status": "skipped", "message": "greprules edited-file scan skipped because project dir is not available: " + str(root)}
@@ -646,7 +654,7 @@ def scan_session(root: Path, session_dir: Path, payload: Dict[str, Any], *, auto
         clear_dirty(session_dir)
         log_msg(root, "scan skipped; no edited files captured")
         return {"status": "skipped"}
-    limit = agent_int(agent, "autoScanMaxChangedFiles", DEFAULT_MAX_CHANGED_FILES, "GREPRULES_AUTO_SCAN_MAX_CHANGED_FILES") if automatic else 0
+    limit = agent_int(agent, "autoScanMaxChangedFiles", DEFAULT_MAX_CHANGED_FILES) if automatic else 0
     if limit > 0 and len(targets) > limit:
         message = too_many_targets_message(len(targets), limit, automatic)
         return {"status": "skipped", "message": message, "targets": targets, "targetsPath": str(scan_targets_path(session_dir))}
@@ -747,11 +755,11 @@ def scan_edited(root: Path, payload: Dict[str, Any]) -> int:
 
 
 def scan_if_dirty(root: Path, payload: Dict[str, Any]) -> int:
-    agent = agent_config(root)
+    agent = agent_settings(root)
     if hook_bool(payload, "stop_hook_active", "stopHookActive"):
         log_msg(root, "stop_hook_active=true; skipping automatic scan block")
         return 0
-    if not agent_bool(agent, "autoScan", False, "GREPRULES_AUTO_SCAN"):
+    if not agent_bool(agent, "autoScan", False):
         log_msg(root, "auto scan disabled; preserving edited file state")
         return 0
     session_dir = session_state_dir(root, payload)
@@ -784,8 +792,8 @@ def fallback_string(value: Any, fallback: str) -> str:
 
 
 def readiness_context(root: Path) -> int:
-    agent = agent_config(root)
-    if not agent_bool(agent, "autoScan", False, "GREPRULES_AUTO_SCAN"):
+    agent = agent_settings(root)
+    if not agent_bool(agent, "autoScan", False):
         log_msg(root, "auto scan disabled; readiness check skipped")
         return 0
     if not root.is_dir():

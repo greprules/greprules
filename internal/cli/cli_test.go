@@ -574,29 +574,13 @@ func TestConfigSetGlobalAndInspect(t *testing.T) {
 	if err := runConfigSet([]string{"--root", root, "opengrep.includeDefaultRules", "true", "--global"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runConfigSet([]string{"--root", root, "agent.autoScan", "true", "--global"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := runConfigSet([]string{"--root", root, "agent.trackEditedFiles", "false", "--global"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := runConfigSet([]string{"--root", root, "agent.autoScanMinIntervalSeconds", "12", "--global"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := runConfigSet([]string{"--root", root, "agent.autoScanMaxChangedFiles", "34", "--global"}); err != nil {
-		t.Fatal(err)
-	}
 	resolution, err := config.LoadEffectiveConfig(root)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if resolution.Config.OpenGrep.Mode != "system" ||
 		resolution.Config.Registry != "http://127.0.0.1:8790" ||
-		!resolution.Config.OpenGrep.IncludeDefaultRules ||
-		!resolution.Config.Agent.AutoScan ||
-		resolution.Config.Agent.TrackEditedFiles ||
-		resolution.Config.Agent.AutoScanMinIntervalSeconds != 12 ||
-		resolution.Config.Agent.AutoScanMaxChangedFiles != 34 {
+		!resolution.Config.OpenGrep.IncludeDefaultRules {
 		t.Fatalf("unexpected effective config: %#v", resolution.Config)
 	}
 	if _, err := os.Stat(userConfig); err != nil {
@@ -604,32 +588,14 @@ func TestConfigSetGlobalAndInspect(t *testing.T) {
 	}
 }
 
-func TestAgentConfigEnvOverrides(t *testing.T) {
+func TestAgentConfigKeysUnsupported(t *testing.T) {
 	root := t.TempDir()
 	userConfig := filepath.Join(t.TempDir(), "config.json")
 	t.Setenv("GREPRULES_USER_CONFIG", userConfig)
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.test\n")
 
-	if err := runConfigSet([]string{"--root", root, "agent.autoScan", "true", "--global"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := runConfigSet([]string{"--root", root, "agent.trackEditedFiles", "true", "--global"}); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GREPRULES_AUTO_SCAN", "false")
-	t.Setenv("GREPRULES_TRACK_EDITED_FILES", "false")
-	t.Setenv("GREPRULES_AUTO_SCAN_MIN_INTERVAL_SECONDS", "7")
-	t.Setenv("GREPRULES_AUTO_SCAN_MAX_CHANGED_FILES", "8")
-
-	resolution, err := config.LoadEffectiveConfig(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resolution.Config.Agent.AutoScan ||
-		resolution.Config.Agent.TrackEditedFiles ||
-		resolution.Config.Agent.AutoScanMinIntervalSeconds != 7 ||
-		resolution.Config.Agent.AutoScanMaxChangedFiles != 8 {
-		t.Fatalf("unexpected env-overridden agent config: %#v", resolution.Config.Agent)
+	if err := runConfigSet([]string{"--root", root, "agent.autoScan", "true", "--global"}); err == nil {
+		t.Fatal("expected agent.autoScan to be unsupported")
 	}
 }
 

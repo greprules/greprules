@@ -41,23 +41,22 @@ The same skills can also be selected implicitly when the user asks Codex to set 
 
 - `SessionStart` checks registry and OpenGrep readiness. Missing rule packs are not treated as setup failures because scan commands can select and fetch packs from target context.
 - `PostToolUse` tracks files Codex edited through `apply_patch`/file-edit tools under `.greprules/plugin-data/codex/sessions/<session-id>/`.
-- `Stop` scans the tracked edited files for the current Codex session once when `agent.autoScan=true`. The adapter passes absolute explicit targets; edited-file scans do not use git changed-file tracking. A clean scan is allowed to finish without a follow-up prompt. If findings, warnings, errors, or rule-pack selection work need attention, it continues Codex with instructions to keep the original development result as the primary response and append greprules review as a short secondary section.
+- `Stop` scans the tracked edited files for the current Codex session once when Codex greprules `autoScan=true`. The adapter passes absolute explicit targets; edited-file scans do not use git changed-file tracking. A clean scan is allowed to finish without a follow-up prompt. If findings, warnings, errors, or rule-pack selection work need attention, it continues Codex with instructions to keep the original development result as the primary response and append greprules review as a short secondary section.
 
 If only some hooks are trusted, `SessionStart` can warn that automatic scans are not fully active. If `SessionStart` itself is not trusted, Codex will not run the warning hook; review hook trust in Codex and trust all greprules entries.
 
-Automatic scans are disabled by default. Enable the automatic Stop hook scan persistently:
+Automatic scans are disabled by default. Use `$greprules-configure` to update Codex greprules settings under `${CODEX_HOME:-~/.codex}/plugins/greprules/settings.json`:
 
-```bash
-greprules config set agent.autoScan true --global
+```json
+{
+  "autoScan": true,
+  "trackEditedFiles": true,
+  "autoScanMinIntervalSeconds": 45,
+  "autoScanMaxChangedFiles": 100
+}
 ```
 
-Edited-file tracking remains enabled by default, so `$greprules-scan-edited` can still be run manually. A successful edited-file scan clears dirty state for that Codex session; readiness failures, pack-selection gaps, and too-many-target skips keep the dirty state for a later scan. To disable tracking as well:
-
-```bash
-greprules config set agent.trackEditedFiles false --global
-```
-
-For a one-session override, set `GREPRULES_AUTO_SCAN=true` or `GREPRULES_TRACK_EDITED_FILES=false` before starting Codex.
+Edited-file tracking remains enabled by default, so `$greprules-scan-edited` can still be run manually. A successful edited-file scan clears dirty state for that Codex session; readiness failures, pack-selection gaps, and too-many-target skips keep the dirty state for a later scan.
 
 ## CLI Resolution
 

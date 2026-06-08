@@ -16,7 +16,6 @@ func setupAgentPluginTestEnv(t *testing.T) (string, string) {
 	t.Helper()
 	root := t.TempDir()
 	state := filepath.Join(root, "state")
-	t.Setenv("GREPRULES_AUTO_SCAN_MIN_INTERVAL_SECONDS", "0")
 	return root, state
 }
 

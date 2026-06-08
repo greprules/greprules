@@ -94,16 +94,24 @@ By default, greprules scans fetched greprules.io packs only. To also include Ope
 greprules config set opengrep.includeDefaultRules true --global
 ```
 
-Agent behavior is configured through the same shared config:
+Hook behavior is configured per agent plugin, not through the shared CLI config:
 
-```bash
-greprules config set agent.autoScan true --global
-greprules config set agent.trackEditedFiles false --global
-greprules config set agent.autoScanMinIntervalSeconds 45 --global
-greprules config set agent.autoScanMaxChangedFiles 100 --global
+```text
+~/.claude/plugins/greprules/settings.json
+~/.codex/plugins/greprules/settings.json
+~/.hermes/plugins/greprules/settings.json
 ```
 
-Environment variables with the same behavior, such as `GREPRULES_AUTO_SCAN=true`, are intended as temporary session overrides.
+Each file uses the same keys:
+
+```json
+{
+  "autoScan": false,
+  "trackEditedFiles": true,
+  "autoScanMinIntervalSeconds": 45,
+  "autoScanMaxChangedFiles": 100
+}
+```
 
 ## Results and Local Files
 
@@ -184,12 +192,6 @@ User/global config is JSON:
     "path": "/Users/l0ch/.local/bin/opengrep",
     "version": "latest",
     "includeDefaultRules": false
-  },
-  "agent": {
-    "autoScan": false,
-    "trackEditedFiles": true,
-    "autoScanMinIntervalSeconds": 45,
-    "autoScanMaxChangedFiles": 100
   }
 }
 ```

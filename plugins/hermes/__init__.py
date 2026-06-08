@@ -24,6 +24,12 @@ logger = logging.getLogger(__name__)
 _PLUGIN_DIR = Path(__file__).resolve().parent
 _DEFAULT_MIN_INTERVAL_SECONDS = 45
 _DEFAULT_MAX_CHANGED_FILES = 100
+_DEFAULT_AGENT_SETTINGS: Dict[str, Any] = {
+    "autoScan": False,
+    "trackEditedFiles": True,
+    "autoScanMinIntervalSeconds": _DEFAULT_MIN_INTERVAL_SECONDS,
+    "autoScanMaxChangedFiles": _DEFAULT_MAX_CHANGED_FILES,
+}
 _RECENT_ROOTS: Dict[str, Set[str]] = {}
 _LOCK = threading.Lock()
 _SAFE_SESSION_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -199,45 +205,58 @@ def _run(args: Sequence[str], cwd: Path, timeout: int = 180) -> Tuple[int, str, 
     return proc.returncode, proc.stdout, proc.stderr
 
 
-def _agent_config(root: Path) -> Dict[str, Any]:
-    code, out, err = _run(["config", "inspect", "--root", str(root), "--format", "json"], root)
-    if code != 0:
-        logger.debug("greprules config inspect failed: %s", err or out)
-        return {}
+def _agent_settings_path() -> Path:
+    override = os.environ.get("GREPRULES_HERMES_SETTINGS_PATH", "").strip()
+    if override:
+        return Path(override).expanduser()
+    raw_home = os.environ.get("HERMES_HOME", "").strip()
+    home = Path(raw_home).expanduser() if raw_home else Path.home() / ".hermes"
+    return home / "plugins" / "greprules" / "settings.json"
+
+
+def _agent_settings() -> Dict[str, Any]:
+    settings = dict(_DEFAULT_AGENT_SETTINGS)
+    path = _agent_settings_path()
+    if not path.exists():
+        return settings
     try:
-        resolution = json.loads(out)
+        loaded = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError:
-        logger.debug("greprules config inspect returned non-JSON: %s", out)
-        return {}
-    config = resolution.get("config") if isinstance(resolution, dict) else {}
-    agent = config.get("agent") if isinstance(config, dict) else {}
-    return agent if isinstance(agent, dict) else {}
+        logger.debug("greprules Hermes settings returned non-JSON: %s", path)
+        return settings
+    except Exception as exc:
+        logger.debug("greprules Hermes settings could not be read: %s", exc)
+        return settings
+    if not isinstance(loaded, dict):
+        return settings
+    for key in ("autoScan", "trackEditedFiles"):
+        value = loaded.get(key)
+        if isinstance(value, bool):
+            settings[key] = value
+    for key in ("autoScanMinIntervalSeconds", "autoScanMaxChangedFiles"):
+        value = loaded.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            settings[key] = value
+    return settings
 
 
-def _agent_bool(agent: Dict[str, Any], key: str, default: bool, *env_names: str) -> bool:
+def _save_agent_setting(key: str, value: Any) -> str:
+    settings = _agent_settings()
+    settings[key] = value
+    path = _agent_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(settings, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return str(path)
+
+
+def _agent_bool(agent: Dict[str, Any], key: str, default: bool) -> bool:
     value = agent.get(key, default)
-    parsed = value if isinstance(value, bool) else default
-    for env_name in env_names:
-        raw = os.environ.get(env_name, "").strip().lower()
-        if raw:
-            return raw not in {"0", "false", "no", "off"}
-    return parsed
+    return value if isinstance(value, bool) else default
 
 
-def _agent_int(agent: Dict[str, Any], key: str, default: int, *env_names: str) -> int:
+def _agent_int(agent: Dict[str, Any], key: str, default: int) -> int:
     value = agent.get(key, default)
-    parsed = value if isinstance(value, int) and value >= 0 else default
-    for env_name in env_names:
-        raw = os.environ.get(env_name, "").strip()
-        if not raw:
-            continue
-        try:
-            override = int(raw)
-        except ValueError:
-            continue
-        if override >= 0:
-            return override
-    return parsed
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else default
 
 
 def _current_cwd(kwargs: Dict[str, Any]) -> Path:
@@ -312,13 +331,7 @@ def _output_dir(session_dir: Path) -> Path:
 
 
 def _last_scan_recent(session_dir: Path, agent: Dict[str, Any]) -> bool:
-    min_interval = _agent_int(
-        agent,
-        "autoScanMinIntervalSeconds",
-        _DEFAULT_MIN_INTERVAL_SECONDS,
-        "GREPRULES_HERMES_AUTO_SCAN_MIN_INTERVAL_SECONDS",
-        "GREPRULES_AUTO_SCAN_MIN_INTERVAL_SECONDS",
-    )
+    min_interval = _agent_int(agent, "autoScanMinIntervalSeconds", _DEFAULT_MIN_INTERVAL_SECONDS)
     if min_interval <= 0:
         return False
     try:
@@ -502,8 +515,8 @@ def _scan_dirty(root: Path, session_key: str, *, auto: bool) -> Optional[str]:
     session_dir = _session_state_dir(root, session_key)
     if session_dir is None:
         return None
-    agent = _agent_config(root)
-    if auto and not _agent_bool(agent, "autoScan", False, "GREPRULES_HERMES_AUTO_SCAN", "GREPRULES_AUTO_SCAN"):
+    agent = _agent_settings()
+    if auto and not _agent_bool(agent, "autoScan", False):
         return None
     if auto and _last_scan_recent(session_dir, agent):
         return None
@@ -513,17 +526,7 @@ def _scan_dirty(root: Path, session_key: str, *, auto: bool) -> Optional[str]:
     if not targets:
         _clear_dirty(session_dir)
         return None
-    limit = (
-        _agent_int(
-            agent,
-            "autoScanMaxChangedFiles",
-            _DEFAULT_MAX_CHANGED_FILES,
-            "GREPRULES_HERMES_AUTO_SCAN_MAX_CHANGED_FILES",
-            "GREPRULES_AUTO_SCAN_MAX_CHANGED_FILES",
-        )
-        if auto
-        else 0
-    )
+    limit = _agent_int(agent, "autoScanMaxChangedFiles", _DEFAULT_MAX_CHANGED_FILES) if auto else 0
     if limit > 0 and len(targets) > limit:
         return _too_many_targets_message(len(targets), limit, auto)
     command = [
@@ -617,17 +620,16 @@ def _format_doctor(root: Path) -> str:
                 if part
             )
         )
-    config = report.get("config") or {}
-    effective = config.get("config") if isinstance(config, dict) else {}
-    agent = effective.get("agent") if isinstance(effective, dict) else {}
-    if isinstance(agent, dict):
-        lines.append(
-            "agent: autoScan={auto} trackEditedFiles={track} maxChangedFiles={max_files}".format(
-                auto=str(agent.get("autoScan", False)).lower(),
-                track=str(agent.get("trackEditedFiles", True)).lower(),
-                max_files=agent.get("autoScanMaxChangedFiles", _DEFAULT_MAX_CHANGED_FILES),
-            )
+    agent = _agent_settings()
+    lines.append(
+        "hermes settings: autoScan={auto} trackEditedFiles={track} minIntervalSeconds={min_interval} maxChangedFiles={max_files} path={path}".format(
+            auto=str(agent.get("autoScan", False)).lower(),
+            track=str(agent.get("trackEditedFiles", True)).lower(),
+            min_interval=agent.get("autoScanMinIntervalSeconds", _DEFAULT_MIN_INTERVAL_SECONDS),
+            max_files=agent.get("autoScanMaxChangedFiles", _DEFAULT_MAX_CHANGED_FILES),
+            path=_agent_settings_path(),
         )
+    )
     if report.get("recommendedCommands"):
         lines.append("recommended: " + _recommended(report))
     return "\n".join(lines)
@@ -717,19 +719,23 @@ def _configure(root: Path, argv: List[str]) -> str:
     elif mode == "auto-scan":
         if len(argv) < 2 or argv[1].lower() not in {"true", "false"}:
             return "usage: /greprules configure auto-scan true|false"
-        commands = [["config", "set", "agent.autoScan", argv[1].lower(), "--global"]]
+        path = _save_agent_setting("autoScan", argv[1].lower() == "true")
+        return f"updated Hermes greprules settings: {path}\n" + _format_doctor(root)
     elif mode == "track-edited-files":
         if len(argv) < 2 or argv[1].lower() not in {"true", "false"}:
             return "usage: /greprules configure track-edited-files true|false"
-        commands = [["config", "set", "agent.trackEditedFiles", argv[1].lower(), "--global"]]
+        path = _save_agent_setting("trackEditedFiles", argv[1].lower() == "true")
+        return f"updated Hermes greprules settings: {path}\n" + _format_doctor(root)
     elif mode == "auto-scan-min-interval":
         if len(argv) < 2 or not argv[1].isdigit():
             return "usage: /greprules configure auto-scan-min-interval <seconds>"
-        commands = [["config", "set", "agent.autoScanMinIntervalSeconds", argv[1], "--global"]]
+        path = _save_agent_setting("autoScanMinIntervalSeconds", int(argv[1]))
+        return f"updated Hermes greprules settings: {path}\n" + _format_doctor(root)
     elif mode == "auto-scan-max-changed-files":
         if len(argv) < 2 or not argv[1].isdigit():
             return "usage: /greprules configure auto-scan-max-changed-files <count>"
-        commands = [["config", "set", "agent.autoScanMaxChangedFiles", argv[1], "--global"]]
+        path = _save_agent_setting("autoScanMaxChangedFiles", int(argv[1]))
+        return f"updated Hermes greprules settings: {path}\n" + _format_doctor(root)
     else:
         return "unknown configure option. Run /greprules configure for supported options."
     outputs = []
@@ -820,8 +826,8 @@ def _on_post_tool_call(
         return
     cwd = _current_cwd(kwargs)
     root = cwd
-    agent = _agent_config(root)
-    if not _agent_bool(agent, "trackEditedFiles", True, "GREPRULES_HERMES_TRACK_EDITED_FILES", "GREPRULES_TRACK_EDITED_FILES"):
+    agent = _agent_settings()
+    if not _agent_bool(agent, "trackEditedFiles", True):
         return
     _mark_dirty_paths(candidates, cwd, session_id, task_id)
 

@@ -176,14 +176,6 @@ func PrintText(writer io.Writer, report Report, debug bool) {
 		fmt.Fprintf(writer, " path=%s", cfg.OpenGrep.Path)
 	}
 	fmt.Fprintln(writer)
-	fmt.Fprintf(
-		writer,
-		"agent config: autoScan=%t trackEditedFiles=%t autoScanMinIntervalSeconds=%d autoScanMaxChangedFiles=%d\n",
-		cfg.Agent.AutoScan,
-		cfg.Agent.TrackEditedFiles,
-		cfg.Agent.AutoScanMinIntervalSeconds,
-		cfg.Agent.AutoScanMaxChangedFiles,
-	)
 	if report.Registry.OK {
 		fmt.Fprintln(writer, "registry: ok")
 	} else {
