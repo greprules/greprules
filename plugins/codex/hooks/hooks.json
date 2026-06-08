@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/greprules-hook.py\" doctor",
+            "command": "sh -c 's=\"${PLUGIN_ROOT}/scripts/greprules-hook.py\"; if [ -f \"$s\" ]; then exec python3 \"$s\" doctor; fi; printf \"%s\\n\" \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"SessionStart\\\",\\\"additionalContext\\\":\\\"greprules plugin cache changed while this Codex session was open. Start a new Codex session to reload greprules.\\\"}}\"'",
             "statusMessage": "Checking greprules readiness"
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/greprules-hook.py\" mark-dirty",
+            "command": "sh -c 's=\"${PLUGIN_ROOT}/scripts/greprules-hook.py\"; if [ -f \"$s\" ]; then exec python3 \"$s\" mark-dirty; fi; printf \"%s\\n\" \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"PostToolUse\\\",\\\"additionalContext\\\":\\\"greprules plugin cache changed while this Codex session was open. Start a new Codex session to reload greprules.\\\"}}\"'",
             "statusMessage": "Tracking greprules scan targets"
           }
         ]
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${PLUGIN_ROOT}/scripts/greprules-hook.py\" scan-if-dirty",
+            "command": "sh -c 's=\"${PLUGIN_ROOT}/scripts/greprules-hook.py\"; if [ -f \"$s\" ]; then exec python3 \"$s\" scan-if-dirty; fi; printf \"%s\\n\" \"{\\\"continue\\\":true,\\\"systemMessage\\\":\\\"greprules plugin cache changed while this Codex session was open. Start a new Codex session to reload greprules.\\\"}\"'",
             "statusMessage": "Running greprules edited-file scan"
           }
         ]
