@@ -27,8 +27,9 @@ The bundled wrapper can download the configured greprules release into a user ca
 ## Slash Commands
 
 ```text
-/greprules doctor
+/greprules setup
 /greprules configure registry https://api.greprules.io
+/greprules configure
 /greprules configure managed
 /greprules configure system
 /greprules configure path /absolute/path/to/opengrep
@@ -47,7 +48,6 @@ The bundled wrapper can download the configured greprules release into a user ca
 Aliases:
 
 ```text
-/greprules-doctor
 /greprules-scan-edited
 /greprules-scan-working-tree
 /greprules-scan-target src/auth

@@ -8,15 +8,16 @@ Hermes slash commands and hooks resolve the greprules command through the plugin
 
 Available slash commands:
 
-1. `/greprules doctor` checks registry access, rule-pack fetch state, and OpenGrep readiness.
-2. `/greprules configure managed|system|path <exe>` configures the OpenGrep runtime.
-3. `/greprules configure registry <url>`, `include-default-rules true|false`, `auto-scan true|false`, `track-edited-files true|false`, `auto-scan-min-interval <seconds>`, and `auto-scan-max-changed-files <count>` configure persistent greprules behavior.
-4. `/greprules scan-edited` scans files tracked by the Hermes `post_tool_call` hook for a single dirty session.
-5. `/greprules scan-working-tree` scans git working tree, staged, and untracked files.
-6. `/greprules scan-target <path>` scans explicit files or directories.
-7. `/greprules scan-full` scans the full repository.
+1. `/greprules setup` sets up greprules after installation.
+2. `/greprules configure` checks registry access, rule-pack fetch state, OpenGrep readiness, and effective agent settings.
+3. `/greprules configure managed|system|path <exe>` configures the OpenGrep runtime.
+4. `/greprules configure registry <url>`, `include-default-rules true|false`, `auto-scan true|false`, `track-edited-files true|false`, `auto-scan-min-interval <seconds>`, and `auto-scan-max-changed-files <count>` configure persistent greprules behavior.
+5. `/greprules scan-edited` scans files tracked by the Hermes `post_tool_call` hook for a single dirty session.
+6. `/greprules scan-working-tree` scans git working tree, staged, and untracked files.
+7. `/greprules scan-target <path>` scans explicit files or directories.
+8. `/greprules scan-full` scans the full repository.
 
-Aliases are also available: `/greprules-doctor`, `/greprules-scan-edited`, `/greprules-scan-working-tree`, `/greprules-scan-target <path>`, and `/greprules-scan-full`.
+Aliases are also available: `/greprules-scan-edited`, `/greprules-scan-working-tree`, `/greprules-scan-target <path>`, and `/greprules-scan-full`.
 
 When rule packs are not fetched yet, use agent-assisted selection: inspect the target files and run `greprules recommend --format json --agent` with `--target`, `--changed`, or `--targets-from` matching the scan scope through the resolved plugin command. Edited-file scans pass absolute target files; git changed-file selection is reserved for `/greprules scan-working-tree`. Choose only slugs present in `availablePacks`, fetch them with the explicit fetch command shown in the scan message, then rerun the scan.
 

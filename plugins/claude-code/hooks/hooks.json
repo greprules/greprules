@@ -34,7 +34,7 @@
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/greprules-hook.py",
             "args": [
-              "doctor"
+              "readiness"
             ]
           }
         ]

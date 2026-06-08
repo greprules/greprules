@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 's=\"${PLUGIN_ROOT}/scripts/greprules-hook.py\"; if [ -f \"$s\" ]; then exec python3 \"$s\" doctor; fi; printf \"%s\\n\" \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"SessionStart\\\",\\\"additionalContext\\\":\\\"greprules plugin cache changed while this Codex session was open. Start a new Codex session to reload greprules.\\\"}}\"'",
+            "command": "sh -c 's=\"${PLUGIN_ROOT}/scripts/greprules-hook.py\"; if [ -f \"$s\" ]; then exec python3 \"$s\" readiness; fi; printf \"%s\\n\" \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"SessionStart\\\",\\\"additionalContext\\\":\\\"greprules plugin cache changed while this Codex session was open. Start a new Codex session to reload greprules.\\\"}}\"'",
             "statusMessage": "Checking greprules readiness"
           }
         ]

@@ -467,18 +467,27 @@ def _mark_dirty_paths(paths: Iterable[str], cwd: Path, session_id: str, task_id:
 def _doctor_json(root: Path) -> Tuple[Optional[Dict[str, Any]], str]:
     code, out, err = _run(["doctor", "--root", str(root), "--format", "json"], root)
     if code != 0:
-        return None, (err or out or "greprules doctor failed").strip()
+        return None, (err or out or "greprules readiness check failed").strip()
     try:
         return json.loads(out), ""
     except json.JSONDecodeError as exc:
-        return None, f"could not parse greprules doctor JSON: {exc}"
+        return None, f"could not parse greprules readiness JSON: {exc}"
 
 
 def _recommended(report: Dict[str, Any]) -> str:
     commands = report.get("recommendedCommands") or []
     if isinstance(commands, list) and commands:
-        return ", ".join(str(command) for command in commands)
-    return "greprules doctor --format json"
+        visible = []
+        for command in commands:
+            text = str(command)
+            if text.startswith("greprules doctor"):
+                text = "/greprules configure"
+            elif text.startswith("greprules setup-opengrep"):
+                text = "/greprules setup"
+            if text not in visible:
+                visible.append(text)
+        return ", ".join(visible)
+    return "/greprules configure"
 
 
 def _too_many_targets_message(count: int, limit: int, auto: bool) -> str:
@@ -584,7 +593,7 @@ def _scan_with_args(root: Path, args: Sequence[str], label: str) -> str:
 def _format_doctor(root: Path) -> str:
     report, error = _doctor_json(root)
     if report is None:
-        return "greprules doctor failed: " + error
+        return "greprules readiness check failed: " + error
     registry = report.get("registry") or {}
     lock = report.get("lock") or {}
     active = ((report.get("opengrep") or {}).get("active") or {})
@@ -622,6 +631,49 @@ def _format_doctor(root: Path) -> str:
     if report.get("recommendedCommands"):
         lines.append("recommended: " + _recommended(report))
     return "\n".join(lines)
+
+
+def _effective_opengrep_mode(report: Dict[str, Any]) -> str:
+    config = report.get("config") or {}
+    effective = config.get("config") if isinstance(config, dict) else {}
+    opengrep = effective.get("opengrep") if isinstance(effective, dict) else {}
+    if isinstance(opengrep, dict):
+        mode = opengrep.get("mode")
+        if isinstance(mode, str):
+            return mode
+    return "managed"
+
+
+def _setup(root: Path) -> str:
+    report, error = _doctor_json(root)
+    if report is None:
+        return "greprules setup could not inspect current state: " + error
+    active = ((report.get("opengrep") or {}).get("active") or {})
+    registry = report.get("registry") or {}
+    active_ok = bool(active.get("ok"))
+    if bool(registry.get("ok")) and active_ok:
+        return "greprules setup complete.\n" + _format_doctor(root)
+    if active_ok:
+        return "greprules setup checked runtime.\n" + _format_doctor(root)
+    mode = _effective_opengrep_mode(report)
+    if mode != "managed":
+        return (
+            _format_doctor(root)
+            + f"\n\nOpenGrep is configured for {mode}. Run /greprules configure to inspect status or choose a different runtime."
+        )
+    outputs: List[str] = []
+    for command in (
+        ["config", "set", "opengrep.mode", "managed", "--global"],
+        ["setup-opengrep", "--root", str(root)],
+    ):
+        code, out, err = _run(command, root, timeout=600)
+        if code != 0:
+            return "greprules setup failed: " + (err or out or "unknown setup failure").strip()
+        if out.strip():
+            outputs.append(out.strip())
+    outputs.append("greprules setup complete.")
+    outputs.append(_format_doctor(root))
+    return "\n".join(outputs)
 
 
 def _configure(root: Path, argv: List[str]) -> str:
@@ -696,7 +748,7 @@ def _help() -> str:
 /greprules — greprules.io rule-pack scanning for Hermes
 
 Subcommands:
-  doctor                         Check registry, rule-pack fetch state, and OpenGrep runtime
+  setup                          Set up greprules after installation
   configure [mode]               Configure OpenGrep runtime: managed, system, path <exe>
   fetch [pack]                   Fetch recommended packs, or one named pack
   scan-edited                    Scan files Hermes edited and tracked this session
@@ -705,7 +757,6 @@ Subcommands:
   scan-full                      Scan the full repository
 
 Aliases:
-  /greprules-doctor
   /greprules-scan-edited
   /greprules-scan-working-tree
   /greprules-scan-target <path>
@@ -724,8 +775,8 @@ def _handle_greprules(raw_args: str = "") -> str:
         return _help()
     sub = argv[0]
     rest = argv[1:]
-    if sub == "doctor":
-        return _format_doctor(root)
+    if sub == "setup":
+        return _setup(root)
     if sub == "configure":
         return _configure(root, rest)
     if sub == "fetch":
@@ -788,8 +839,7 @@ def _on_pre_llm_call(session_id: str = "", task_id: str = "", **kwargs: Any) -> 
 
 
 def register(ctx) -> None:
-    ctx.register_command("greprules", _handle_greprules, "Run greprules doctor, configure, fetch, and scan commands", args_hint="<subcommand>")
-    ctx.register_command("greprules-doctor", _alias("doctor"), "Check greprules readiness")
+    ctx.register_command("greprules", _handle_greprules, "Run greprules setup, configure, fetch, and scan commands", args_hint="<subcommand>")
     ctx.register_command("greprules-scan-edited", _alias("scan-edited"), "Scan files Hermes edited in this session")
     ctx.register_command("greprules-scan-working-tree", _alias("scan-working-tree"), "Scan git working tree, staged, and untracked files")
     ctx.register_command("greprules-scan-target", _alias("scan-target"), "Scan explicit greprules targets", args_hint="<path>")

@@ -783,23 +783,23 @@ def fallback_string(value: Any, fallback: str) -> str:
     return value if isinstance(value, str) and value else fallback
 
 
-def doctor_context(root: Path) -> int:
+def readiness_context(root: Path) -> int:
     agent = agent_config(root)
     if not agent_bool(agent, "autoScan", False, "GREPRULES_AUTO_SCAN"):
-        log_msg(root, "auto scan disabled; doctor skipped")
+        log_msg(root, "auto scan disabled; readiness check skipped")
         return 0
     if not root.is_dir():
-        log_msg(root, f"doctor skipped because project dir is not available: {root}")
+        log_msg(root, f"readiness check skipped because project dir is not available: {root}")
         return 0
     proc = run_cli(["doctor", "--root", str(root), "--format", "json"], root, timeout=180)
     if proc.returncode != 0:
-        log_msg(root, "doctor failed: " + (proc.stderr or proc.stdout).strip())
+        log_msg(root, "readiness check failed: " + (proc.stderr or proc.stdout).strip())
         emit_system_message("greprules readiness check failed: " + (proc.stderr or proc.stdout).strip(), {"hook_event_name": "SessionStart"})
         return 0
     try:
         report = json.loads(proc.stdout)
     except json.JSONDecodeError as exc:
-        emit_system_message("greprules readiness check failed: could not parse doctor JSON: " + str(exc), {"hook_event_name": "SessionStart"})
+        emit_system_message("greprules readiness check failed: could not parse readiness JSON: " + str(exc), {"hook_event_name": "SessionStart"})
         return 0
 
     registry_ok = bool(nested(report, "registry", "ok"))
@@ -807,7 +807,7 @@ def doctor_context(root: Path) -> int:
     active_ok = bool(nested(report, "opengrep", "active", "ok"))
     hook_warning = codex_hook_warning()
     if registry_ok and active_ok and not hook_warning:
-        log_msg(root, "doctor ok")
+        log_msg(root, "readiness check ok")
         return 0
     if registry_ok and active_ok and hook_warning:
         emit_system_message("greprules automatic scan hooks need attention." + hook_warning, {"hook_event_name": "SessionStart"})
@@ -815,7 +815,7 @@ def doctor_context(root: Path) -> int:
 
     setup_guidance = ""
     if not active_ok:
-        setup_guidance = " Run the $greprules-configure or $greprules-doctor skill to choose an OpenGrep runtime."
+        setup_guidance = " Run the $greprules-setup or $greprules-configure skill to choose an OpenGrep runtime."
         system = nested(report, "opengrep", "system") or {}
         runtime = system.get("runtime") if isinstance(system, dict) else None
         if isinstance(system, dict) and system.get("ok") and isinstance(runtime, dict):
@@ -827,7 +827,8 @@ def doctor_context(root: Path) -> int:
             setup_guidance += " No system opengrep was found on PATH."
 
     recommended_commands = report.get("recommendedCommands")
-    recommended = ", ".join(str(item) for item in recommended_commands) if isinstance(recommended_commands, list) and recommended_commands else "greprules doctor --format json"
+    recommended = ", ".join(str(item) for item in recommended_commands) if isinstance(recommended_commands, list) and recommended_commands else "$greprules-configure"
+    recommended = recommended.replace("greprules setup-opengrep", "$greprules-setup").replace("greprules doctor --format json", "$greprules-configure")
 
     rule_pack_guidance = ""
     if not lock_exists:
@@ -859,8 +860,8 @@ def main() -> int:
         return code
     if mode == "scan-edited":
         return scan_edited(root, payload)
-    if mode == "doctor":
-        return doctor_context(root)
+    if mode in {"readiness", "doctor"}:
+        return readiness_context(root)
     sys.stderr.write(f"unknown greprules Codex hook mode: {mode}\n")
     return 2
 

@@ -2,7 +2,7 @@
 
 Agent plugin for fetching trusted SAST rule packs from greprules.io and scanning local code changes with OpenGrep.
 
-greprules is designed for local coding agents first. The Claude Code, Codex, and Hermes plugins give agents commands or skills for checking setup, configuring OpenGrep, selecting rule packs from code context, fetching those packs, and scanning local code changes. The Go CLI is the deterministic local runtime behind those commands.
+greprules is designed for local coding agents first. The Claude Code, Codex, and Hermes plugins give agents commands or skills for first-run setup, configuring OpenGrep, selecting rule packs from code context, fetching those packs, and scanning local code changes. The Go CLI is the deterministic local runtime behind those commands.
 
 ## Quick Start
 
@@ -15,7 +15,7 @@ greprules is designed for local coding agents first. The Claude Code, Codex, and
 ```
 
 ```text
-/greprules:doctor
+/greprules:setup
 /greprules:configure
 /greprules:scan-edited
 ```
@@ -34,7 +34,7 @@ Codex CLI TUI:
 ```
 
 ```text
-$greprules-doctor
+$greprules-setup
 $greprules-configure
 $greprules-scan-edited
 ```
@@ -46,12 +46,12 @@ hermes plugins install greprules/greprules --enable
 ```
 
 ```text
-/greprules doctor
-/greprules configure managed
+/greprules setup
+/greprules configure
 /greprules scan-edited
 ```
 
-Run `doctor` first in your agent to check local readiness.
+Run `setup` once after installing the plugin. Use `configure` later to inspect status or change settings.
 
 ## What It Does
 
@@ -135,8 +135,8 @@ Shared files such as `.greprules/config.yaml` and `.greprules/lock.json` are not
 The CLI is useful when you want the same scan behavior outside an agent.
 
 ```bash
-greprules doctor
 greprules init --mode auto
+greprules setup-opengrep
 greprules fetch
 greprules scan --changed
 ```
@@ -210,7 +210,7 @@ For safety, `opengrep.path` from shared `.greprules/config.yaml` is ignored. Put
 For local worker development only:
 
 ```bash
-GREPRULES_REGISTRY=http://127.0.0.1:8790 greprules doctor
+GREPRULES_REGISTRY=http://127.0.0.1:8790 greprules config inspect --format json
 ```
 
 ## Plugin Runtime

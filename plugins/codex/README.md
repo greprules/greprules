@@ -20,14 +20,14 @@ codex plugin marketplace add /absolute/path/to/greprules
 
 Codex requires hook review before non-managed command hooks run. Review and trust the greprules hook entries if Codex prompts for hook review. In the Codex CLI TUI, use `/hooks`.
 
-If automatic scans are enabled but edited-file scans do not run, use `$greprules-doctor`. It checks whether the plugin is enabled and whether the `SessionStart`, `PostToolUse`, and `Stop` hook entries have been trusted in Codex. Missing hook trust means greprules is installed but the automatic scan flow is not active yet.
+If automatic scans are enabled but edited-file scans do not run, use `$greprules-configure`. It checks whether the plugin is enabled and whether the `SessionStart`, `PostToolUse`, and `Stop` hook entries have been trusted in Codex. Missing hook trust means greprules is installed but the automatic scan flow is not active yet.
 
 ## Skills
 
 Use `$` in the Codex composer to invoke a skill explicitly:
 
 ```text
-$greprules-doctor
+$greprules-setup
 $greprules-configure
 $greprules-scan-edited
 $greprules-scan-working-tree
@@ -35,7 +35,7 @@ $greprules-scan-target src/auth
 $greprules-scan-full
 ```
 
-The same skills can also be selected implicitly when the user asks Codex to configure greprules or run a greprules scan.
+The same skills can also be selected implicitly when the user asks Codex to set up greprules, configure greprules, or run a greprules scan.
 
 ## Automatic Hooks
 

@@ -1,8 +1,8 @@
 ---
-description: Configure greprules registry and OpenGrep runtime through the CLI
+description: Inspect and configure greprules registry, OpenGrep runtime, and agent behavior through the CLI
 ---
 
-Use this skill when the user asks to configure greprules for Claude Code or local agent use.
+Use this skill when the user asks to configure greprules for Claude Code or local agent use, inspect current greprules status, or change existing greprules settings.
 
 Rules:
 
@@ -11,7 +11,8 @@ Rules:
 - Use global config for machine/user preferences such as registry URL, OpenGrep mode, and OpenGrep executable path.
 - Use repo-local config only for settings that are specific to this checkout and should not be committed.
 - Do not write `opengrep.path` to shared `.greprules/config.yaml`.
-- After changing config, run `greprules config inspect --format json` or `greprules doctor --format json` and summarize the effective config.
+- Always use `greprules doctor --format json` as the current-state diagnostic before deciding what to change.
+- After changing config, run `greprules doctor --format json` again and summarize registry/OpenGrep readiness plus the effective agent settings.
 - Treat a missing lockfile as rule-pack fetch state, not incomplete OpenGrep configuration. Scan commands should use agent-assisted pack selection before fetching when the registry is reachable.
 - Do not configure OpenGrep through Claude Code plugin options; this plugin intentionally has no install-time userConfig.
 - Persist OpenGrep runtime selection with `greprules config set ... --global` so Claude Code, terminals, and CI share the same setting.
@@ -35,8 +36,8 @@ greprules config set agent.autoScan true --global
 greprules config set agent.trackEditedFiles false --global
 greprules config set agent.autoScanMinIntervalSeconds 45 --global
 greprules config set agent.autoScanMaxChangedFiles 100 --global
-greprules config inspect --format json
 greprules doctor --format json
+greprules config inspect --format json
 ```
 
 For local worker development only, override the registry explicitly:
@@ -45,18 +46,19 @@ For local worker development only, override the registry explicitly:
 GREPRULES_REGISTRY=http://127.0.0.1:8790 greprules doctor --format json
 ```
 
-Runtime selection workflow:
+Workflow:
 
 1. Run `greprules doctor --format json`.
-2. If `opengrep.active.ok` is true and the user did not ask to change runtime, summarize runtime readiness and stop. If `lock.exists` is false, mention only that rule packs have not been fetched yet and scan commands can select packs from target context before fetching.
-3. Check `opengrep.system.ok`, `opengrep.system.runtime.path`, and `opengrep.system.runtime.version` first.
-4. If the user has not already chosen a runtime, use AskUserQuestion when available; otherwise ask one concise question. Offer these choices:
+2. If the user asked only for current status or settings, summarize `status`, registry readiness, active OpenGrep runtime, rule-pack fetch state, and effective `agent.*` settings, then stop. If `lock.exists` is false, mention only that rule packs have not been fetched yet and scan commands can select packs from target context before fetching.
+3. If the user asked to change a non-runtime setting, apply the smallest `greprules config set ... --global` change, then rerun `greprules doctor --format json` and summarize the updated state.
+4. For runtime changes, check `opengrep.system.ok`, `opengrep.system.runtime.path`, and `opengrep.system.runtime.version` first.
+5. If the user has not already chosen a runtime, use AskUserQuestion when available; otherwise ask one concise question. Offer these choices:
    - Use system OpenGrep on PATH. Recommend this when `opengrep.system.ok` is true.
    - Install managed OpenGrep. Recommend this when no system OpenGrep is available or the user wants reproducible scans.
    - Use a manual OpenGrep executable path. Ask for the absolute path before applying it.
-5. If the user chooses system OpenGrep, run `greprules config set opengrep.mode system --global`.
-6. If the user chooses managed OpenGrep, run `greprules config set opengrep.mode managed --global`, then `greprules setup-opengrep`.
-7. If the user chooses a manual path, verify it with `greprules doctor --engine path --opengrep-path <path> --format json`, then write `opengrep.mode=path` and `opengrep.path=<path>` to global config.
-8. Run `greprules doctor --format json` again and summarize registry/OpenGrep readiness. Do not call missing rule packs a setup failure.
+6. If the user chooses system OpenGrep, run `greprules config set opengrep.mode system --global`.
+7. If the user chooses managed OpenGrep, run `greprules config set opengrep.mode managed --global`, then `greprules setup-opengrep`.
+8. If the user chooses a manual path, verify it with `greprules doctor --engine path --opengrep-path <path> --format json`, then write `opengrep.mode=path` and `opengrep.path=<path>` to global config.
+9. Run `greprules doctor --format json` again and summarize registry/OpenGrep readiness. Do not call missing rule packs a setup failure.
 
 If the user asks for a recommended default and no system OpenGrep is already available, prefer managed OpenGrep for reproducible community scans. If system OpenGrep is already available, ask before switching because system is faster to adopt but less reproducible across machines.
