@@ -1,8 +1,15 @@
 # greprules
 
-Agent plugin for fetching trusted SAST rule packs from greprules.io and scanning local code changes with OpenGrep.
+[![Release](https://img.shields.io/github/v/release/greprules/greprules?sort=semver)](https://github.com/greprules/greprules/releases)
+[![CI](https://github.com/greprules/greprules/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/greprules/greprules/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/greprules/greprules)](https://github.com/greprules/greprules/blob/main/LICENSE)
+[![Go Report](https://goreportcard.com/badge/github.com/greprules/greprules)](https://goreportcard.com/report/github.com/greprules/greprules)
+
+Agent plugin and CLI for fetching SAST rule packs from greprules.io and scanning local code changes with OpenGrep.
 
 greprules is designed for local coding agents first. The Claude Code, Codex, and Hermes plugins give agents commands or skills for first-run setup, configuring OpenGrep, selecting rule packs from code context, fetching those packs, and scanning local code changes. The Go CLI is the deterministic local runtime behind those commands.
+
+greprules is maintained in the greprules GitHub organization with support from Provally. Provally operates the hosted greprules.io registry and API used by the default configuration. Normal scans fetch rule packs from greprules.io, run OpenGrep locally, and write results to local `.greprules/` files.
 
 ## Quick Start
 
@@ -253,3 +260,13 @@ greprules cleanup --config --plugin-cache
 greprules cleanup --purge
 greprules cleanup --repo
 ```
+
+## Maintainers
+
+greprules is maintained by contributors in the greprules GitHub organization with support from [Provally](https://provally.io/).
+
+<p>
+  <a href="https://provally.io/">
+    <img src="docs/assets/provally-logo.png" alt="Provally" width="28" height="28">
+  </a>
+</p>
