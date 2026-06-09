@@ -1,8 +1,5 @@
-blank_issues_enabled: true
+blank_issues_enabled: false
 contact_links:
-  - name: Security vulnerability
-    url: https://github.com/greprules/greprules/security/advisories/new
-    about: Please report vulnerabilities privately when GitHub private reporting is available.
   - name: greprules docs
     url: https://greprules.io/docs
     about: Read the public documentation for setup, rule discovery, and agent plugin usage.
