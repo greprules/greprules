@@ -892,8 +892,14 @@ func normalizeEnryLanguage(language string) []string {
 	switch strings.ToLower(strings.TrimSpace(language)) {
 	case "javascript":
 		return []string{"javascript"}
+	case "jsx":
+		return []string{"javascript"}
 	case "typescript":
 		return []string{"typescript"}
+	case "tsx":
+		return []string{"typescript"}
+	case "vue", "svelte":
+		return []string{"javascript"}
 	case "python":
 		return []string{"python"}
 	case "go":

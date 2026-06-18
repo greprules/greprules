@@ -159,6 +159,34 @@ func TestDetectTargetsUsesLanguageScopedContextManifests(t *testing.T) {
 	}
 }
 
+func TestDetectTargetsNormalizesTSXForContextManifests(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "package.json"), `{
+  "dependencies": {
+    "next": "15.0.0",
+    "react": "19.0.0"
+  },
+  "devDependencies": {
+    "typescript": "5.0.0"
+  }
+}`)
+	writeFile(t, filepath.Join(root, "app", "page.tsx"), "export default function Page(): JSX.Element { return <main>Hello</main> }\n")
+
+	result, err := DetectTargets(root, []string{filepath.Join("app", "page.tsx")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasSignal(result.Languages, "typescript") {
+		t.Fatalf("expected tsx target to normalize to typescript, got %#v", result.Languages)
+	}
+	if !hasSignal(result.Frameworks, "nextjs") {
+		t.Fatalf("expected nextjs framework from package.json, got %#v", result.Frameworks)
+	}
+	if !hasSignal(result.Frameworks, "react") {
+		t.Fatalf("expected react framework from package.json, got %#v", result.Frameworks)
+	}
+}
+
 func TestDetectJavaPomFrameworkDependencies(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "pom.xml"), `<project>
