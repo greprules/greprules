@@ -53,6 +53,7 @@ func TestRunFetchWritesLockAndCache(t *testing.T) {
 
 func TestRunRecommendAgentContextUsesTargetSignals(t *testing.T) {
 	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "pyproject.toml"), "[project]\ndependencies = [\"fastapi\"]\n")
 	writeFile(t, filepath.Join(root, "src", "main.py"), "from fastapi import FastAPI\napp = FastAPI()\n")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/packs" {
@@ -87,6 +88,7 @@ func TestRunRecommendAgentContextUsesTargetSignals(t *testing.T) {
 
 func TestRunFetchUsesTargetAwareRecommendation(t *testing.T) {
 	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "pyproject.toml"), "[project]\ndependencies = [\"fastapi\"]\n")
 	writeFile(t, filepath.Join(root, "src", "main.py"), "from fastapi import FastAPI\napp = FastAPI()\n")
 	tarball := makePackTarball(t)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,6 +117,109 @@ func TestRunFetchUsesTargetAwareRecommendation(t *testing.T) {
 	}
 	if len(lock.Packs) != 1 || lock.Packs[0].ID != "python-web-security" {
 		t.Fatalf("unexpected lock: %#v", lock)
+	}
+}
+
+func TestRunScanAutoFetchesMissingLockForStandalone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake runtime is unix-only")
+	}
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "pyproject.toml"), "[project]\ndependencies = [\"fastapi\"]\n")
+	writeFile(t, filepath.Join(root, "src", "main.py"), "from fastapi import FastAPI\napp = FastAPI()\n")
+	tarball := makePackTarball(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/packs":
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"python-web-security","name":"Python Web Security","languages":["python"]}]}`))
+		case "/api/packs/python-web-security/manifest.json":
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"schema_version":1,"slug":"python-web-security","build_id":"build-1","total_rules":1,"languages":["python"],"rules":[{"slug":"example","yaml_path":"rules/example.yaml"}]}`))
+		case "/api/packs/python-web-security/latest.tar.gz":
+			w.Header().Set("content-type", "application/gzip")
+			_, _ = w.Write(tarball)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	fakeOpenGrep := filepath.Join(root, "fake-opengrep")
+	writeFile(t, fakeOpenGrep, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'opengrep 9.8.7\n'
+  exit 0
+fi
+out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output) shift; out="$1" ;;
+  esac
+  shift
+done
+printf '{"results":[]}\n' > "$out"
+`)
+	if err := os.Chmod(fakeOpenGrep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Registry = server.URL
+	cfg.OpenGrep.Mode = "path"
+	cfg.OpenGrep.Managed = false
+	cfg.OpenGrep.Path = fakeOpenGrep
+	if err := config.SaveLocalConfig(root, cfg); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	withStdout(t, &stdout, func() {
+		if err := runScan(t.Context(), []string{"--root", root, "--target", "src/main.py", "--sarif=false", "--explain-selection"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	output := stdout.String()
+	for _, want := range []string{"detected languages:", "python-web-security", "fetched python-web-security", "wrote .greprules/out/agent-result.json"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected %q in scan output, got %q", want, output)
+		}
+	}
+	lock, err := config.LoadLock(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lock.Packs) != 1 || lock.Packs[0].ID != "python-web-security" {
+		t.Fatalf("unexpected lock: %#v", lock)
+	}
+	assertFileExists(t, filepath.Join(root, ".greprules", "out", "agent-result.json"))
+}
+
+func TestRunScanNoAutoFetchKeepsMissingLockFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake runtime is unix-only")
+	}
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "main.go"), "package main\n")
+	fakeOpenGrep := filepath.Join(root, "fake-opengrep")
+	writeFile(t, fakeOpenGrep, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'opengrep 9.8.7\n'
+  exit 0
+fi
+printf '{"results":[]}\n'
+`)
+	if err := os.Chmod(fakeOpenGrep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.OpenGrep.Mode = "path"
+	cfg.OpenGrep.Managed = false
+	cfg.OpenGrep.Path = fakeOpenGrep
+	if err := config.SaveLocalConfig(root, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	err := runScan(t.Context(), []string{"--root", root, "--full", "--sarif=false", "--no-auto-fetch"})
+	if err == nil || !strings.Contains(err.Error(), "lockfile missing") {
+		t.Fatalf("expected missing lockfile error, got %v", err)
 	}
 }
 

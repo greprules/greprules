@@ -99,7 +99,7 @@ Usage:
   greprules recommend [--agent] [--changed|--target PATH|--targets-from FILE]
   greprules fetch [--pack PACK|--changed|--target PATH|--targets-from FILE]
   greprules setup-opengrep [--version latest]
-  greprules scan [--changed|--full|--target PATH|--targets-from FILE] [--output-dir DIR] [--engine managed|system|path]
+  greprules scan [--changed|--full|--target PATH|--targets-from FILE] [--output-dir DIR] [--engine managed|system|path] [--no-auto-fetch] [--no-auto-setup] [--explain-selection]
   greprules doctor [--debug] [--engine managed|system|path]
   greprules cleanup [--config|--cache|--opengrep|--plugin-cache|--repo|--all] [--dry-run]`)
 }
@@ -419,6 +419,13 @@ type fetchCommandOptions struct {
 
 var errNoPacksSelected = errors.New("no packs selected")
 
+type packSelection struct {
+	Detection  detect.Result
+	Candidates []recommend.Candidate
+	PackIDs    []string
+	Source     string
+}
+
 func runFetch(ctx context.Context, args []string) error {
 	return runFetchWithOptions(ctx, args, fetchCommandOptions{stdout: os.Stdout})
 }
@@ -456,20 +463,41 @@ func runFetchWithOptions(ctx context.Context, args []string, options fetchComman
 	}
 	client := registry.New(cfg.Registry)
 	if len(packIDs) == 0 {
-		rawTargets, err := collectTargetInputs(root, targetFlags, *targetsFrom, *changed)
+		selection, err := selectPackIDsForTargets(ctx, root, cfg, client, targetFlags, *targetsFrom, *changed)
 		if err != nil {
 			return err
 		}
-		result, err := detectForTargets(root, rawTargets)
-		if err != nil {
-			return err
-		}
-		available, _ := client.ListPacks(ctx)
-		packIDs = recommend.PackIDs(recommend.ForDetection(result, available))
+		packIDs = selection.PackIDs
 	}
 	if len(packIDs) == 0 {
 		return fmt.Errorf("%w; use --pack or run greprules recommend --format json --agent with the same targets", errNoPacksSelected)
 	}
+	return fetchAndLockPacks(ctx, root, cfg, client, packIDs, options)
+}
+
+func selectPackIDsForTargets(ctx context.Context, root string, cfg config.Config, client registry.Client, targets []string, targetsFrom string, changed bool) (packSelection, error) {
+	if len(cfg.Packs) > 0 {
+		return packSelection{PackIDs: append([]string{}, cfg.Packs...), Source: "config"}, nil
+	}
+	rawTargets, err := collectTargetInputs(root, targets, targetsFrom, changed)
+	if err != nil {
+		return packSelection{}, err
+	}
+	result, err := detectForTargets(root, rawTargets)
+	if err != nil {
+		return packSelection{}, err
+	}
+	available, _ := client.ListPacks(ctx)
+	candidates := recommend.ForDetection(result, available)
+	return packSelection{
+		Detection:  result,
+		Candidates: candidates,
+		PackIDs:    recommend.PackIDs(candidates),
+		Source:     "detected",
+	}, nil
+}
+
+func fetchAndLockPacks(ctx context.Context, root string, cfg config.Config, client registry.Client, packIDs []string, options fetchCommandOptions) error {
 	lockedPacks := make([]config.LockedPack, 0, len(packIDs))
 	for _, packID := range packIDs {
 		locked, err := fetchPack(ctx, root, cfg, client, packID)
@@ -588,18 +616,20 @@ func runSetupOpenGrep(ctx context.Context, args []string) error {
 }
 
 type scanCommandOptions struct {
-	quiet  bool
-	stdout io.Writer
-	stderr io.Writer
+	quiet       bool
+	stdout      io.Writer
+	stderr      io.Writer
+	autoPrepare bool
 }
 
 func runScan(ctx context.Context, args []string) error {
-	return runScanWithOptions(ctx, args, scanCommandOptions{stdout: os.Stdout, stderr: os.Stderr})
+	return runScanWithOptions(ctx, args, scanCommandOptions{stdout: os.Stdout, stderr: os.Stderr, autoPrepare: true})
 }
 
 func runScanWithOptions(ctx context.Context, args []string, options scanCommandOptions) error {
 	fs := flag.NewFlagSet("scan", flag.ContinueOnError)
 	rootFlag := fs.String("root", ".", "repo root or child path")
+	registryURL := fs.String("registry", "", "registry URL override for automatic rule-pack fetch")
 	changed := fs.Bool("changed", false, "scan changed files")
 	full := fs.Bool("full", false, "scan full repo")
 	sarif := fs.Bool("sarif", true, "write SARIF output")
@@ -608,6 +638,9 @@ func runScanWithOptions(ctx context.Context, args []string, options scanCommandO
 	opengrepVersion := fs.String("opengrep-version", "", "managed OpenGrep version override")
 	targetsFrom := fs.String("targets-from", "", "newline-delimited file of scan targets relative to root")
 	outputDir := fs.String("output-dir", "", "scan output directory override")
+	noAutoFetch := fs.Bool("no-auto-fetch", false, "do not fetch rule packs automatically when the lockfile is missing")
+	noAutoSetup := fs.Bool("no-auto-setup", false, "do not install managed OpenGrep automatically when it is missing")
+	explainSelection := fs.Bool("explain-selection", false, "print detected context and selected rule packs before scanning")
 	var targetFlags stringList
 	fs.Var(&targetFlags, "target", "explicit scan target path, repeatable or comma-separated")
 	if err := fs.Parse(args); err != nil {
@@ -619,6 +652,25 @@ func runScanWithOptions(ctx context.Context, args []string, options scanCommandO
 	}
 	if err := ensureGreprulesGitignore(root); err != nil {
 		return err
+	}
+	if options.autoPrepare {
+		if err := prepareStandaloneScan(ctx, standaloneScanOptions{
+			Root:             root,
+			RegistryURL:      *registryURL,
+			Changed:          *changed,
+			Targets:          []string(targetFlags),
+			TargetsFrom:      *targetsFrom,
+			AutoFetch:        !*noAutoFetch,
+			AutoSetup:        !*noAutoSetup,
+			ExplainSelection: *explainSelection,
+			EngineMode:       *engineMode,
+			OpenGrepPath:     *opengrepPath,
+			OpenGrepVersion:  *opengrepVersion,
+			Quiet:            options.quiet,
+			Stdout:           options.stdout,
+		}); err != nil {
+			return err
+		}
 	}
 	return scanservice.Run(ctx, scanservice.Options{
 		Root:            root,
@@ -635,6 +687,156 @@ func runScanWithOptions(ctx context.Context, args []string, options scanCommandO
 		Stdout:          options.stdout,
 		Stderr:          options.stderr,
 	})
+}
+
+type standaloneScanOptions struct {
+	Root             string
+	RegistryURL      string
+	Changed          bool
+	Targets          []string
+	TargetsFrom      string
+	AutoFetch        bool
+	AutoSetup        bool
+	ExplainSelection bool
+	EngineMode       string
+	OpenGrepPath     string
+	OpenGrepVersion  string
+	Quiet            bool
+	Stdout           io.Writer
+}
+
+func prepareStandaloneScan(ctx context.Context, options standaloneScanOptions) error {
+	cfg, err := runtimeconfig.LoadOrDefaultConfig(options.Root)
+	if err != nil {
+		return err
+	}
+	if options.RegistryURL != "" {
+		cfg.Registry = options.RegistryURL
+	}
+	writer := options.Stdout
+	if writer == nil {
+		writer = os.Stdout
+	}
+	lock, lockErr := config.LoadLock(options.Root)
+	lockReady := lockErr == nil && len(lock.Packs) > 0
+	if lockErr != nil && !errors.Is(lockErr, os.ErrNotExist) {
+		return fmt.Errorf("read lockfile: %w", lockErr)
+	}
+
+	if lockReady {
+		if options.ExplainSelection && !options.Quiet {
+			printLockedPackSelection(writer, lock)
+		}
+	} else if options.AutoFetch {
+		client := registry.New(cfg.Registry)
+		selection, err := selectPackIDsForTargets(ctx, options.Root, cfg, client, options.Targets, options.TargetsFrom, options.Changed)
+		if err != nil {
+			return err
+		}
+		if options.ExplainSelection && !options.Quiet {
+			printPackSelection(writer, selection, "fetching selected rule packs")
+		} else if !options.Quiet && len(selection.PackIDs) > 0 {
+			fmt.Fprintln(writer, "selected rule packs:", strings.Join(selection.PackIDs, ", "))
+		}
+		if len(selection.PackIDs) == 0 {
+			return fmt.Errorf("%w; use --pack, configure packs, or run greprules recommend with the same targets", errNoPacksSelected)
+		}
+		if err := fetchAndLockPacks(ctx, options.Root, cfg, client, selection.PackIDs, fetchCommandOptions{quiet: options.Quiet, stdout: options.Stdout}); err != nil {
+			return err
+		}
+		lock, lockErr = config.LoadLock(options.Root)
+		lockReady = lockErr == nil && len(lock.Packs) > 0
+	} else if options.ExplainSelection && !options.Quiet {
+		client := registry.New(cfg.Registry)
+		selection, err := selectPackIDsForTargets(ctx, options.Root, cfg, client, options.Targets, options.TargetsFrom, options.Changed)
+		if err != nil {
+			return err
+		}
+		printPackSelection(writer, selection, "auto-fetch disabled")
+	}
+
+	if options.AutoSetup && lockReady {
+		if err := ensureStandaloneOpenGrep(ctx, options.Root, cfg, lock, options); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func ensureStandaloneOpenGrep(ctx context.Context, root string, cfg config.Config, lock config.Lock, options standaloneScanOptions) error {
+	if _, err := runtimeconfig.FromConfigOrLock(lock, cfg, options.EngineMode, options.OpenGrepPath, options.OpenGrepVersion); err == nil {
+		return nil
+	}
+	mode := options.EngineMode
+	if mode == "" {
+		mode = cfg.OpenGrep.Mode
+	}
+	if mode == "" {
+		mode = "managed"
+	}
+	if mode != "managed" {
+		return nil
+	}
+	version := options.OpenGrepVersion
+	if version == "" {
+		version = cfg.OpenGrep.Version
+	}
+	runtimeInfo, err := opengrep.Setup(ctx, opengrep.SetupOptions{Version: version})
+	if err != nil {
+		return fmt.Errorf("OpenGrep runtime is not available and automatic setup failed; run greprules setup-opengrep: %w", err)
+	}
+	if !options.Quiet {
+		writer := options.Stdout
+		if writer == nil {
+			writer = os.Stdout
+		}
+		fmt.Fprintf(writer, "installed OpenGrep %s at %s\n", runtimeInfo.Version, runtimeInfo.Path)
+	}
+	lock.Engine = runtimeconfig.LockedEngineFromRuntime(runtimeInfo)
+	return config.SaveLock(root, lock)
+}
+
+func printPackSelection(writer io.Writer, selection packSelection, note string) {
+	if len(selection.Detection.Languages) > 0 {
+		fmt.Fprintln(writer, "detected languages:")
+		for _, language := range selection.Detection.Languages {
+			fmt.Fprintf(writer, "  %s confidence=%.2f sources=%s\n", language.Name, language.Confidence, strings.Join(language.Sources, ","))
+		}
+	}
+	if len(selection.Detection.Frameworks) > 0 {
+		fmt.Fprintln(writer, "detected frameworks:")
+		for _, framework := range selection.Detection.Frameworks {
+			fmt.Fprintf(writer, "  %s confidence=%.2f sources=%s\n", framework.Name, framework.Confidence, strings.Join(framework.Sources, ","))
+		}
+	}
+	if len(selection.PackIDs) == 0 {
+		fmt.Fprintln(writer, "selected rule packs: none")
+		return
+	}
+	fmt.Fprintln(writer, "selected rule packs:")
+	if selection.Source == "config" {
+		for _, packID := range selection.PackIDs {
+			fmt.Fprintf(writer, "  %s reason=configured in greprules config\n", packID)
+		}
+	} else {
+		for _, candidate := range selection.Candidates {
+			fmt.Fprintf(writer, "  %s confidence=%.2f reason=%s\n", candidate.PackID, candidate.Confidence, candidate.Reason)
+		}
+	}
+	if note != "" {
+		fmt.Fprintln(writer, "selection:", note)
+	}
+}
+
+func printLockedPackSelection(writer io.Writer, lock config.Lock) {
+	if len(lock.Packs) == 0 {
+		fmt.Fprintln(writer, "using locked rule packs: none")
+		return
+	}
+	fmt.Fprintln(writer, "using locked rule packs:")
+	for _, pack := range lock.Packs {
+		fmt.Fprintf(writer, "  %s version=%s rules=%d\n", pack.ID, pack.Version, pack.TotalRules)
+	}
 }
 
 func runDoctor(ctx context.Context, args []string) error {

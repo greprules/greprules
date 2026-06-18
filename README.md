@@ -150,22 +150,26 @@ Shared files such as `.greprules/config.yaml` and `.greprules/lock.json` are not
 The CLI is useful when you want the same scan behavior outside an agent.
 
 ```bash
-greprules init --mode auto
-greprules setup-opengrep
-greprules fetch
-greprules scan --changed
+greprules scan .
 ```
+
+On first run, `scan` detects the target language/framework context, selects matching greprules.io rule packs, fetches and pins them in `.greprules/lock.json`, installs managed OpenGrep when needed, and then runs OpenGrep locally. Existing lockfiles are reused so pinned rule packs stay reproducible.
 
 More commands:
 
 ```bash
+greprules scan --changed
 greprules detect --format json
 greprules config inspect --format json
 greprules recommend --format json --agent --target path/to/file
+greprules fetch
 greprules setup-opengrep
 greprules scan --target path/to/file
 greprules scan --targets-from .greprules/out/targets.txt
 greprules scan --full
+greprules scan . --no-auto-fetch
+greprules scan . --no-auto-setup
+greprules scan . --explain-selection
 greprules cleanup --plugin-cache --dry-run
 ```
 
