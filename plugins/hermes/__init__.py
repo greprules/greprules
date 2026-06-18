@@ -477,8 +477,8 @@ def _mark_dirty_paths(paths: Iterable[str], cwd: Path, session_id: str, task_id:
         _remember_root(root, session_id, task_id)
 
 
-def _doctor_json(root: Path) -> Tuple[Optional[Dict[str, Any]], str]:
-    code, out, err = _run(["doctor", "--root", str(root), "--format", "json"], root)
+def _status_json(root: Path) -> Tuple[Optional[Dict[str, Any]], str]:
+    code, out, err = _run(["agent-status", "--root", str(root), "--format", "json"], root)
     if code != 0:
         return None, (err or out or "greprules readiness check failed").strip()
     try:
@@ -493,7 +493,7 @@ def _recommended(report: Dict[str, Any]) -> str:
         visible = []
         for command in commands:
             text = str(command)
-            if text.startswith("greprules doctor"):
+            if text.startswith("greprules agent-status"):
                 text = "/greprules configure"
             elif text.startswith("greprules setup-opengrep"):
                 text = "/greprules setup"
@@ -593,8 +593,8 @@ def _scan_with_args(root: Path, args: Sequence[str], label: str) -> str:
     return out.strip() or f"greprules {label} scan finished. Full result: {root / '.greprules' / 'out' / 'agent-result.json'}"
 
 
-def _format_doctor(root: Path) -> str:
-    report, error = _doctor_json(root)
+def _format_status(root: Path) -> str:
+    report, error = _status_json(root)
     if report is None:
         return "greprules readiness check failed: " + error
     registry = report.get("registry") or {}
@@ -647,25 +647,25 @@ def _effective_opengrep_mode(report: Dict[str, Any]) -> str:
 
 
 def _setup(root: Path) -> str:
-    report, error = _doctor_json(root)
+    report, error = _status_json(root)
     if report is None:
         return "greprules setup could not inspect current state: " + error
     active = ((report.get("opengrep") or {}).get("active") or {})
     registry = report.get("registry") or {}
     active_ok = bool(active.get("ok"))
     if bool(registry.get("ok")) and active_ok:
-        return "greprules setup complete.\n" + _format_doctor(root)
+        return "greprules setup complete.\n" + _format_status(root)
     if active_ok:
-        return "greprules setup checked runtime.\n" + _format_doctor(root)
+        return "greprules setup checked runtime.\n" + _format_status(root)
     mode = _effective_opengrep_mode(report)
     if mode != "managed":
         return (
-            _format_doctor(root)
+            _format_status(root)
             + f"\n\nOpenGrep is configured for {mode}. Run /greprules configure to inspect status or choose a different runtime."
         )
     outputs: List[str] = []
     for command in (
-        ["config", "set", "opengrep.mode", "managed", "--global"],
+        ["agent-config", "set", "opengrep.mode", "managed", "--global"],
         ["setup-opengrep", "--root", str(root)],
     ):
         code, out, err = _run(command, root, timeout=600)
@@ -674,14 +674,14 @@ def _setup(root: Path) -> str:
         if out.strip():
             outputs.append(out.strip())
     outputs.append("greprules setup complete.")
-    outputs.append(_format_doctor(root))
+    outputs.append(_format_status(root))
     return "\n".join(outputs)
 
 
 def _configure(root: Path, argv: List[str]) -> str:
     if not argv or argv[0] in {"status", "help", "-h", "--help"}:
         return (
-            _format_doctor(root)
+            _format_status(root)
             + "\n\nConfigure with one of:\n"
             + "  /greprules configure system\n"
             + "  /greprules configure managed\n"
@@ -695,47 +695,47 @@ def _configure(root: Path, argv: List[str]) -> str:
         )
     mode = argv[0]
     if mode == "system":
-        commands = [["config", "set", "opengrep.mode", "system", "--global"]]
+        commands = [["agent-config", "set", "opengrep.mode", "system", "--global"]]
     elif mode == "managed":
         commands = [
-            ["config", "set", "opengrep.mode", "managed", "--global"],
+            ["agent-config", "set", "opengrep.mode", "managed", "--global"],
             ["setup-opengrep", "--root", str(root)],
         ]
     elif mode == "path":
         if len(argv) < 2:
             return "usage: /greprules configure path /absolute/path/to/opengrep"
         commands = [
-            ["config", "set", "opengrep.mode", "path", "--global"],
-            ["config", "set", "opengrep.path", argv[1], "--global"],
+            ["agent-config", "set", "opengrep.mode", "path", "--global"],
+            ["agent-config", "set", "opengrep.path", argv[1], "--global"],
         ]
     elif mode == "include-default-rules":
         if len(argv) < 2 or argv[1].lower() not in {"true", "false"}:
             return "usage: /greprules configure include-default-rules true|false"
-        commands = [["config", "set", "opengrep.includeDefaultRules", argv[1].lower(), "--global"]]
+        commands = [["agent-config", "set", "opengrep.includeDefaultRules", argv[1].lower(), "--global"]]
     elif mode == "registry":
         if len(argv) < 2:
             return "usage: /greprules configure registry https://api.greprules.io"
-        commands = [["config", "set", "registry", argv[1], "--global"]]
+        commands = [["agent-config", "set", "registry", argv[1], "--global"]]
     elif mode == "auto-scan":
         if len(argv) < 2 or argv[1].lower() not in {"true", "false"}:
             return "usage: /greprules configure auto-scan true|false"
         path = _save_agent_setting("autoScan", argv[1].lower() == "true")
-        return f"updated Hermes greprules settings: {path}\n" + _format_doctor(root)
+        return f"updated Hermes greprules settings: {path}\n" + _format_status(root)
     elif mode == "track-edited-files":
         if len(argv) < 2 or argv[1].lower() not in {"true", "false"}:
             return "usage: /greprules configure track-edited-files true|false"
         path = _save_agent_setting("trackEditedFiles", argv[1].lower() == "true")
-        return f"updated Hermes greprules settings: {path}\n" + _format_doctor(root)
+        return f"updated Hermes greprules settings: {path}\n" + _format_status(root)
     elif mode == "auto-scan-min-interval":
         if len(argv) < 2 or not argv[1].isdigit():
             return "usage: /greprules configure auto-scan-min-interval <seconds>"
         path = _save_agent_setting("autoScanMinIntervalSeconds", int(argv[1]))
-        return f"updated Hermes greprules settings: {path}\n" + _format_doctor(root)
+        return f"updated Hermes greprules settings: {path}\n" + _format_status(root)
     elif mode == "auto-scan-max-changed-files":
         if len(argv) < 2 or not argv[1].isdigit():
             return "usage: /greprules configure auto-scan-max-changed-files <count>"
         path = _save_agent_setting("autoScanMaxChangedFiles", int(argv[1]))
-        return f"updated Hermes greprules settings: {path}\n" + _format_doctor(root)
+        return f"updated Hermes greprules settings: {path}\n" + _format_status(root)
     else:
         return "unknown configure option. Run /greprules configure for supported options."
     outputs = []
@@ -745,7 +745,7 @@ def _configure(root: Path, argv: List[str]) -> str:
             return "greprules configure failed: " + (err or out or "unknown configure failure").strip()
         if out.strip():
             outputs.append(out.strip())
-    outputs.append(_format_doctor(root))
+    outputs.append(_format_status(root))
     return "\n".join(outputs)
 
 
@@ -756,7 +756,7 @@ def _help() -> str:
 Subcommands:
   setup                          Set up greprules after installation
   configure [mode]               Configure OpenGrep runtime: managed, system, path <exe>
-  fetch [pack]                   Fetch recommended packs, or one named pack
+  fetch <pack> [pack...]         Fetch explicit rule packs
   scan-edited                    Scan files Hermes edited and tracked this session
   scan-working-tree              Scan git working tree, staged, and untracked files
   scan-target <path> [...]       Scan explicit files or directories
@@ -786,9 +786,10 @@ def _handle_greprules(raw_args: str = "") -> str:
     if sub == "configure":
         return _configure(root, rest)
     if sub == "fetch":
+        if not rest:
+            return "usage: /greprules fetch <slug> [<slug>...]"
         args = ["fetch", "--root", str(root)]
-        if rest:
-            args.extend(["--pack", rest[0]])
+        args.extend(rest)
         code, out, err = _run(args, root, timeout=600)
         return (out or err or "greprules fetch finished").strip() if code == 0 else "greprules fetch failed: " + (err or out).strip()
     if sub == "scan-edited":
@@ -796,14 +797,11 @@ def _handle_greprules(raw_args: str = "") -> str:
     if sub == "scan-working-tree":
         return _scan_with_args(_git_root(cwd), ["--changed"], "working-tree")
     if sub == "scan-full":
-        return _scan_with_args(root, ["--full"], "full-repository")
+        return _scan_with_args(root, [], "full-repository")
     if sub == "scan-target":
         if not rest:
             return "usage: /greprules scan-target <path> [path...]"
-        args: List[str] = []
-        for target in rest:
-            args.extend(["--target", target])
-        return _scan_with_args(root, args, "target")
+        return _scan_with_args(root, rest, "target")
     return "unknown greprules subcommand.\n\n" + _help()
 
 

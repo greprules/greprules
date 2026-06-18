@@ -4,14 +4,14 @@ This plugin teaches Claude Code how to use the local `greprules` CLI without emb
 
 The plugin provides a `bin/greprules` wrapper, not the native Go binary itself. Claude Code skills and hooks invoke that wrapper directly, so `greprules` does not need to be installed on the user's shell `PATH`. The wrapper resolves the real CLI from `GREPRULES_CLI_PATH`, system `PATH` excluding itself, or a managed GitHub Release download cached under the OS user cache directory at `greprules/plugins/claude-code/greprules/<version>/`.
 
-The plugin does not use install-time plugin configuration. OpenGrep runtime selection is stored in the greprules CLI config, so Claude Code, terminals, and CI can share the same behavior.
+The plugin does not use install-time plugin configuration. OpenGrep runtime selection is stored in greprules agent config, so Claude Code, terminals, and CI can share the same behavior when they opt into those advanced settings.
 
-greprules scans fetched greprules.io packs only by default. Enable OpenGrep default auto-selected rules with `greprules config set opengrep.includeDefaultRules true --global` only when you explicitly want that extra ruleset.
+greprules scans fetched greprules.io packs only by default. Enable OpenGrep default auto-selected rules with `greprules agent-config set opengrep.includeDefaultRules true --global` only when you explicitly want that extra ruleset.
 
 It uses structured CLI outputs:
 
-- `greprules config inspect --format json`
-- `.greprules/out/agent-result.json` for normal CLI scans
+- `greprules agent-status --format json`
+- `.greprules/out/agent-result.json` for agent full, working-tree, and explicit-target scans
 - `.greprules/plugin-data/claude-code/sessions/<session-id>/out/agent-result.json` for edited-file plugin scans
 
 Skills:

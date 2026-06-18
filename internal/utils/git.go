@@ -1,4 +1,4 @@
-package gitutil
+package utils
 
 import (
 	"os/exec"

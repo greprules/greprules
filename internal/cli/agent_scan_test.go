@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greprules/greprules/internal/agent"
 	"github.com/greprules/greprules/internal/config"
 )
 
@@ -42,13 +43,13 @@ printf '{"results":[]}\n' > "$out"
 
 	var stdout bytes.Buffer
 	withStdout(t, &stdout, func() {
-		if err := runAgentScan(t.Context(), []string{
+		if err := agent.RunScanCommand(t.Context(), []string{
 			"scan",
 			"--root", root,
 			"--label", "edited-file",
 			"--targets-from", targetsPath,
 			"--output-dir", outputDir,
-			"--sarif=false",
+			"--no-sarif",
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -92,7 +93,7 @@ printf '{"results":[]}\n' > "$out"
 
 	var stdout bytes.Buffer
 	withStdout(t, &stdout, func() {
-		if err := runAgentScan(t.Context(), []string{
+		if err := agent.RunScanCommand(t.Context(), []string{
 			"scan",
 			"--root", root,
 			"--label", "edited-file",
@@ -100,12 +101,12 @@ printf '{"results":[]}\n' > "$out"
 			"--format", "json",
 			"--targets-from", targetsPath,
 			"--output-dir", outputDir,
-			"--sarif=false",
+			"--no-sarif",
 		}); err != nil {
 			t.Fatal(err)
 		}
 	})
-	var outcome agentScanOutcome
+	var outcome agent.ScanOutcome
 	if err := json.Unmarshal(stdout.Bytes(), &outcome); err != nil {
 		t.Fatalf("expected JSON outcome, got %q: %v", stdout.String(), err)
 	}
@@ -159,7 +160,7 @@ exit 0
 
 	var stdout bytes.Buffer
 	withStdout(t, &stdout, func() {
-		if err := runAgentScan(t.Context(), []string{
+		if err := agent.RunScanCommand(t.Context(), []string{
 			"scan",
 			"--root", root,
 			"--label", "edited-file",
@@ -171,23 +172,74 @@ exit 0
 			t.Fatal(err)
 		}
 	})
-	var outcome agentScanOutcome
+	var outcome agent.ScanOutcome
 	if err := json.Unmarshal(stdout.Bytes(), &outcome); err != nil {
 		t.Fatalf("expected JSON outcome, got %q: %v", stdout.String(), err)
 	}
 	if outcome.Status != "needs_pack_selection" {
 		t.Fatalf("expected needs_pack_selection, got %#v", outcome)
 	}
-	for _, want := range []string{"greprules recommend", "--agent", "--targets-from", targetsPath, "greprules fetch", "--pack <slug>", "Do not invent pack slugs"} {
+	for _, want := range []string{"greprules agent-scan recommend", "--targets-from", targetsPath, "greprules fetch", "<slug>", "Do not invent pack slugs"} {
 		if !strings.Contains(outcome.Message, want) {
 			t.Fatalf("message missing %q: %q", want, outcome.Message)
 		}
+	}
+	if strings.Contains(outcome.Message, "--agent") {
+		t.Fatalf("agent recommendation guidance should not use standalone --agent: %q", outcome.Message)
 	}
 	if strings.Contains(outcome.Message, "--exact-root") {
 		t.Fatalf("pack selection guidance should not mention --exact-root: %q", outcome.Message)
 	}
 	if strings.Contains(outcome.Message, "--output-dir") {
 		t.Fatalf("recommend guidance should not include scan-only output-dir: %q", outcome.Message)
+	}
+}
+
+func TestRunAgentRecommendDirectUsesTargetsFrom(t *testing.T) {
+	root, state := setupAgentPluginTestEnv(t)
+	writeFile(t, filepath.Join(root, "pyproject.toml"), "[project]\ndependencies = [\"fastapi\"]\n")
+	writeFile(t, filepath.Join(root, "src", "main.py"), "from fastapi import FastAPI\n")
+	targetsPath := filepath.Join(state, "scan-targets.txt")
+	writeFile(t, targetsPath, "src/main.py\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/packs" {
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"python-web-security","name":"Python Web Security","languages":["python"],"selection":{"kind":"framework","languages":["python"],"frameworks":["fastapi"],"source_types":[],"tags":[]}}]}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	cfg := config.DefaultConfig()
+	cfg.Registry = server.URL
+	if err := config.SaveLocalConfig(root, cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	withStdout(t, &stdout, func() {
+		if err := agent.RunScanCommand(t.Context(), []string{
+			"recommend",
+			"--root", root,
+			"--targets-from", targetsPath,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var context struct {
+		SchemaVersion string `json:"schemaVersion"`
+		Candidates    []struct {
+			PackID string `json:"packId"`
+		} `json:"candidates"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &context); err != nil {
+		t.Fatalf("expected JSON outcome, got %q: %v", stdout.String(), err)
+	}
+	if context.SchemaVersion != "greprules.recommend.agent.v1" {
+		t.Fatalf("unexpected schema: %#v", context)
+	}
+	if len(context.Candidates) != 1 || context.Candidates[0].PackID != "python-web-security" {
+		t.Fatalf("unexpected candidates: %#v", context.Candidates)
 	}
 }
 
@@ -223,13 +275,13 @@ printf '{"results":[]}\n' > "$out"
 
 	var stdout bytes.Buffer
 	withStdout(t, &stdout, func() {
-		if err := runAgentScan(t.Context(), []string{
+		if err := agent.RunScanCommand(t.Context(), []string{
 			"scan",
 			"--root", root,
 			"--label", "edited-file",
 			"--targets-from", targetsPath,
 			"--output-dir", outputDir,
-			"--sarif=false",
+			"--no-sarif",
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -242,7 +294,7 @@ printf '{"results":[]}\n' > "$out"
 }
 
 func TestRunAgentScanEditedCommandRemoved(t *testing.T) {
-	err := runAgentScan(t.Context(), []string{"edited"})
+	err := agent.RunScanCommand(t.Context(), []string{"edited"})
 	if err == nil || !strings.Contains(err.Error(), "unknown agent-scan command: edited") {
 		t.Fatalf("expected edited subcommand to be removed, got %v", err)
 	}

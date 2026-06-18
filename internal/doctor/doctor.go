@@ -7,11 +7,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/greprules/greprules/internal/config"
 	"github.com/greprules/greprules/internal/opengrep"
-	"github.com/greprules/greprules/internal/registry"
-	"github.com/greprules/greprules/internal/runtimeconfig"
+	"github.com/greprules/greprules/internal/rules"
 )
 
 type Options struct {
@@ -67,31 +67,44 @@ func Build(ctx context.Context, root string, options Options) (Report, error) {
 	}
 	cfg := resolution.Config
 	report := Report{
-		SchemaVersion:       "greprules.doctor.v1",
+		SchemaVersion:       "greprules.status.v1",
 		Root:                root,
 		Config:              resolution,
 		RecommendedCommands: []string{},
 		Warnings:            append([]string{}, resolution.Warnings...),
 	}
-	if _, err := registry.New(cfg.Registry).ListPacks(ctx); err != nil {
+	if _, err := rules.NewRegistry(cfg.Registry).ListPacks(ctx); err != nil {
 		report.Registry = CheckStatus{OK: false, Error: err.Error(), URL: cfg.Registry}
 		report.RecommendedCommands = append(report.RecommendedCommands, "check registry URL or run with --registry")
 	} else {
 		report.Registry = CheckStatus{OK: true, URL: cfg.Registry}
 	}
-	if lock, err := config.LoadLock(root); err != nil {
+	lockPath, lockPathErr := config.LockPath(root)
+	if lockPathErr != nil {
 		report.Lock = LockStatus{
 			Exists:  false,
-			Path:    config.LockPath(root),
+			Error:   lockPathErr.Error(),
+			Message: "rule-pack lock path could not be resolved",
+		}
+		report.RecommendedCommands = append(report.RecommendedCommands, "check user state directory permissions")
+	} else if lock, err := config.LoadLock(root); err != nil {
+		report.Lock = LockStatus{
+			Exists:  false,
+			Path:    lockPath,
 			Message: "rule packs are not fetched yet; scan commands can fetch them automatically when the registry is reachable",
 		}
 		if !errors.Is(err, os.ErrNotExist) {
 			report.Lock.Error = err.Error()
-			report.Lock.Message = "rule-pack lockfile could not be read; run greprules fetch to refresh local rule packs"
-			report.RecommendedCommands = append(report.RecommendedCommands, "greprules fetch")
+			report.Lock.Message = "rule-pack lockfile could not be read; run greprules scan to refresh selected rule packs or greprules fetch <slug> for explicit packs"
+			report.RecommendedCommands = append(report.RecommendedCommands, "greprules scan", "greprules fetch <slug>")
 		}
 	} else {
-		report.Lock = LockStatus{Exists: true, Path: config.LockPath(root), PackCount: len(lock.Packs)}
+		report.Lock = LockStatus{Exists: true, Path: lockPath, PackCount: len(lock.Packs)}
+		if missing := config.MissingLockRulePaths(root, lock); len(missing) > 0 {
+			report.Lock.Error = "locked rule pack artifacts are missing: " + strings.Join(missing, ", ")
+			report.Lock.Message = "rule-pack artifacts are missing from user cache; run greprules scan to refresh selected rule packs or greprules fetch <slug> for explicit packs"
+			report.RecommendedCommands = append(report.RecommendedCommands, "greprules scan", "greprules fetch <slug>")
+		}
 		if options.Debug {
 			report.Lock.Value = &lock
 		}
@@ -106,7 +119,11 @@ func Build(ctx context.Context, root string, options Options) (Report, error) {
 	} else {
 		report.OpenGrep.System = RuntimeCheck{OK: true, Runtime: &runtimeInfo}
 	}
-	if runtimeInfo, err := runtimeconfig.FromConfigOrLock(config.Lock{}, cfg, options.EngineMode, options.OpenGrepPath, options.OpenGrepVersion); err != nil {
+	if runtimeInfo, err := opengrep.ResolveFromConfig(config.Lock{}, cfg, opengrep.ConfigOverrides{
+		Mode:    options.EngineMode,
+		Path:    options.OpenGrepPath,
+		Version: options.OpenGrepVersion,
+	}); err != nil {
 		report.OpenGrep.Active = RuntimeCheck{OK: false, Error: err.Error()}
 	} else {
 		report.OpenGrep.Active = RuntimeCheck{OK: true, Runtime: &runtimeInfo}
@@ -126,29 +143,13 @@ func AddOpenGrepRecommendations(report *Report, cfg config.Config) {
 
 	switch cfg.OpenGrep.Mode {
 	case "managed":
-		if report.OpenGrep.System.OK {
-			addRecommendedCommand(report, "greprules config set opengrep.mode system --global")
-			return
-		}
 		addRecommendedCommand(report, "greprules setup-opengrep")
 	case "system":
-		if report.OpenGrep.Managed.OK {
-			addRecommendedCommand(report, "greprules config set opengrep.mode managed --global")
-			return
-		}
 		addRecommendedCommand(report, "greprules setup-opengrep")
 	case "path":
-		if report.OpenGrep.System.OK {
-			addRecommendedCommand(report, "greprules config set opengrep.mode system --global")
-			return
-		}
-		if report.OpenGrep.Managed.OK {
-			addRecommendedCommand(report, "greprules config set opengrep.mode managed --global")
-			return
-		}
 		addRecommendedCommand(report, "greprules setup-opengrep")
 	default:
-		addRecommendedCommand(report, "greprules doctor --format json")
+		addRecommendedCommand(report, "greprules agent-status --format json")
 	}
 }
 
@@ -182,7 +183,15 @@ func PrintText(writer io.Writer, report Report, debug bool) {
 		fmt.Fprintln(writer, "registry:", report.Registry.Error)
 	}
 	if report.Lock.Exists {
-		fmt.Fprintf(writer, "rule packs: %d fetched pack(s)\n", report.Lock.PackCount)
+		if report.Lock.Error != "" {
+			if report.Lock.Message != "" {
+				fmt.Fprintln(writer, "rule packs:", report.Lock.Message)
+			} else {
+				fmt.Fprintln(writer, "rule packs:", report.Lock.Error)
+			}
+		} else {
+			fmt.Fprintf(writer, "rule packs: %d fetched pack(s)\n", report.Lock.PackCount)
+		}
 		if debug && report.Lock.Value != nil {
 			printJSON(writer, report.Lock.Value)
 		}

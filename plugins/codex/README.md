@@ -70,4 +70,4 @@ The bundled wrapper resolves the real CLI in this order:
 
 The release bootstrap downloads the configured greprules CLI into the user cache when a local binary is not available.
 
-Edited-file plugin scans write session-local results under `.greprules/plugin-data/codex/sessions/<session-id>/out/agent-result.json`. Normal working-tree, target, and full scans use the CLI output directory, usually `.greprules/out/agent-result.json`. `$greprules-scan-working-tree` is the git-based changed-file scan path.
+Edited-file plugin scans write session-local results under `.greprules/plugin-data/codex/sessions/<session-id>/out/agent-result.json`. Agent working-tree, target, and full scans use the CLI output directory, usually `.greprules/out/agent-result.json`. `$greprules-scan-working-tree` is the git-based changed-file scan path.

@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -123,6 +125,39 @@ type LockedEngine struct {
 	DownloadedAt    string `json:"downloadedAt,omitempty"`
 }
 
+func OpenGrepConfigPaths(root string, lock Lock, includeDefaultRules bool) []string {
+	paths := make([]string, 0, len(lock.Packs)+1)
+	for _, pack := range lock.Packs {
+		paths = append(paths, LockedRulePath(root, pack))
+	}
+	if includeDefaultRules {
+		paths = append(paths, "auto")
+	}
+	return paths
+}
+
+func LockedRulePath(root string, pack LockedPack) string {
+	if filepath.IsAbs(pack.RulePath) {
+		return pack.RulePath
+	}
+	return filepath.Join(root, pack.RulePath)
+}
+
+func MissingLockRulePaths(root string, lock Lock) []string {
+	missing := []string{}
+	for _, pack := range lock.Packs {
+		path := LockedRulePath(root, pack)
+		if _, err := os.Stat(path); err != nil {
+			missing = append(missing, path)
+		}
+	}
+	return missing
+}
+
+func LockArtifactsReady(root string, lock Lock) bool {
+	return len(lock.Packs) > 0 && len(MissingLockRulePaths(root, lock)) == 0
+}
+
 func DefaultConfig() Config {
 	return Config{
 		SchemaVersion: ConfigSchemaVersion,
@@ -131,7 +166,7 @@ func DefaultConfig() Config {
 		Languages:     []string{},
 		Frameworks:    []string{},
 		Packs:         []string{},
-		CacheDir:      ".greprules/cache",
+		CacheDir:      "user",
 		OutputDir:     ".greprules/out",
 		Scan: ScanConfig{
 			ChangedDefault: true,
@@ -170,8 +205,112 @@ func UserConfigPath() (string, error) {
 	return filepath.Join(root, "greprules", "config.json"), nil
 }
 
-func LockPath(root string) string {
-	return filepath.Join(root, ".greprules", "lock.json")
+func UserStateRoot() (string, error) {
+	if explicit := os.Getenv("GREPRULES_STATE_HOME"); explicit != "" {
+		return filepath.Join(expandHome(explicit), "greprules"), nil
+	}
+	if xdgState := os.Getenv("XDG_STATE_HOME"); xdgState != "" {
+		return filepath.Join(expandHome(xdgState), "greprules"), nil
+	}
+	root, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "greprules", "state"), nil
+}
+
+func UserCacheRoot() (string, error) {
+	if explicit := os.Getenv("GREPRULES_CACHE_HOME"); explicit != "" {
+		return filepath.Join(expandHome(explicit), "greprules"), nil
+	}
+	root, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "greprules"), nil
+}
+
+func ProjectStateDir(root string) (string, error) {
+	stateRoot, err := UserStateRoot()
+	if err != nil {
+		return "", err
+	}
+	projectKey, err := ProjectKey(root)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(stateRoot, "projects", projectKey), nil
+}
+
+func ProjectKey(root string) (string, error) {
+	canonical, err := CanonicalRoot(root)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256([]byte(canonical))
+	name := filepath.Base(canonical)
+	name = sanitizeProjectName(name)
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		name = "project"
+	}
+	return name + "-" + hex.EncodeToString(sum[:])[:16], nil
+}
+
+func CanonicalRoot(root string) (string, error) {
+	if root == "" {
+		root = "."
+	}
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	return filepath.Clean(abs), nil
+}
+
+func sanitizeProjectName(name string) string {
+	var builder strings.Builder
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case r >= 'a' && r <= 'z':
+			builder.WriteRune(r)
+		case r >= '0' && r <= '9':
+			builder.WriteRune(r)
+		case r == '-' || r == '_' || r == '.':
+			builder.WriteRune(r)
+		default:
+			builder.WriteByte('-')
+		}
+	}
+	return strings.Trim(builder.String(), "-.")
+}
+
+func LockPath(root string) (string, error) {
+	return ProjectLockPath(root)
+}
+
+func ProjectLockPath(root string) (string, error) {
+	stateDir, err := ProjectStateDir(root)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(stateDir, "lock.json"), nil
+}
+
+func RulePackCacheRoot(root string, cacheDir string) (string, error) {
+	if cacheDir == "" || cacheDir == "user" {
+		cacheRoot, err := UserCacheRoot()
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(cacheRoot, "packs"), nil
+	}
+	if filepath.IsAbs(cacheDir) {
+		return cacheDir, nil
+	}
+	return filepath.Join(root, cacheDir), nil
 }
 
 func LoadConfig(root string) (Config, error) {
@@ -235,6 +374,17 @@ func LoadEffectiveConfig(root string) (ConfigResolution, error) {
 	return resolution, nil
 }
 
+func LoadEffectiveOrDefault(root string) (Config, error) {
+	resolution, err := LoadEffectiveConfig(root)
+	if err == nil {
+		return resolution.Config, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return DefaultConfig(), nil
+	}
+	return Config{}, err
+}
+
 func SaveConfig(root string, cfg Config) error {
 	normalizeConfig(&cfg)
 	if err := os.MkdirAll(filepath.Dir(ConfigPath(root)), 0o755); err != nil {
@@ -278,7 +428,11 @@ func SaveConfigJSON(path string, cfg Config) error {
 }
 
 func LoadLock(root string) (Lock, error) {
-	data, err := os.ReadFile(LockPath(root))
+	lockPath, err := LockPath(root)
+	if err != nil {
+		return Lock{}, err
+	}
+	data, err := os.ReadFile(lockPath)
 	if err != nil {
 		return Lock{}, err
 	}
@@ -296,7 +450,20 @@ func SaveLock(root string, lock Lock) error {
 	if lock.GeneratedAt == "" {
 		lock.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
 	}
-	if err := os.MkdirAll(filepath.Dir(LockPath(root)), 0o755); err != nil {
+	if lock.Metadata == nil {
+		lock.Metadata = map[string]any{}
+	}
+	if canonical, err := CanonicalRoot(root); err == nil {
+		lock.Metadata["projectRoot"] = canonical
+	}
+	if projectKey, err := ProjectKey(root); err == nil {
+		lock.Metadata["projectKey"] = projectKey
+	}
+	lockPath, err := LockPath(root)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
 		return err
 	}
 	data, err := json.MarshalIndent(lock, "", "  ")
@@ -304,7 +471,7 @@ func SaveLock(root string, lock Lock) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(LockPath(root), data, 0o644)
+	return os.WriteFile(lockPath, data, 0o644)
 }
 
 func normalizeConfig(cfg *Config) {
@@ -318,7 +485,7 @@ func normalizeConfig(cfg *Config) {
 		cfg.Mode = "auto"
 	}
 	if cfg.CacheDir == "" {
-		cfg.CacheDir = ".greprules/cache"
+		cfg.CacheDir = "user"
 	}
 	if cfg.OutputDir == "" {
 		cfg.OutputDir = ".greprules/out"

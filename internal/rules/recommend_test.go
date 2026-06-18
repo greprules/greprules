@@ -1,27 +1,22 @@
-package recommend
+package rules
 
-import (
-	"testing"
-
-	"github.com/greprules/greprules/internal/detect"
-	"github.com/greprules/greprules/internal/registry"
-)
+import "testing"
 
 func TestForDetectionRequiresSelectionMetadata(t *testing.T) {
-	result := detect.Result{
-		Languages:  []detect.Signal{{Name: "typescript", Confidence: 0.9}},
-		Frameworks: []detect.Signal{{Name: "nextjs", Confidence: 0.8}},
+	result := Result{
+		Languages:  []Signal{{Name: "typescript", Confidence: 0.9}},
+		Frameworks: []Signal{{Name: "nextjs", Confidence: 0.8}},
 	}
-	candidates := ForDetection(result, []registry.PackSummary{{Slug: "javascript-typescript-security"}})
+	candidates := ForDetection(result, []PackSummary{{Slug: "javascript-typescript-security"}})
 	if len(candidates) != 0 {
 		t.Fatalf("expected no candidates without selection metadata, got %#v", candidates)
 	}
 }
 
 func TestForDetectionReturnsNoOfflineFallback(t *testing.T) {
-	result := detect.Result{
-		Languages:  []detect.Signal{{Name: "python", Confidence: 0.9}},
-		Frameworks: []detect.Signal{{Name: "fastapi", Confidence: 0.8}},
+	result := Result{
+		Languages:  []Signal{{Name: "python", Confidence: 0.9}},
+		Frameworks: []Signal{{Name: "fastapi", Confidence: 0.8}},
 	}
 	ids := PackIDs(ForDetection(result, nil))
 	if len(ids) != 0 {
@@ -30,21 +25,21 @@ func TestForDetectionReturnsNoOfflineFallback(t *testing.T) {
 }
 
 func TestForDetectionUsesRegistrySelectionMetadata(t *testing.T) {
-	result := detect.Result{
-		Languages:  []detect.Signal{{Name: "python", Confidence: 0.9}},
-		Frameworks: []detect.Signal{{Name: "fastapi", Confidence: 0.8}},
+	result := Result{
+		Languages:  []Signal{{Name: "python", Confidence: 0.9}},
+		Frameworks: []Signal{{Name: "fastapi", Confidence: 0.8}},
 	}
-	candidates := ForDetection(result, []registry.PackSummary{
+	candidates := ForDetection(result, []PackSummary{
 		{
 			Slug: "custom-python-security",
-			Selection: registry.PackSelection{
+			Selection: PackSelection{
 				Kind:      "language",
 				Languages: []string{"python"},
 			},
 		},
 		{
 			Slug: "custom-fastapi-security",
-			Selection: registry.PackSelection{
+			Selection: PackSelection{
 				Kind:       "framework",
 				Languages:  []string{"python"},
 				Frameworks: []string{"fastapi"},
@@ -58,21 +53,21 @@ func TestForDetectionUsesRegistrySelectionMetadata(t *testing.T) {
 }
 
 func TestForDetectionSkipsSourceSelectionPacks(t *testing.T) {
-	result := detect.Result{
-		Languages: []detect.Signal{{Name: "python", Confidence: 0.9}},
+	result := Result{
+		Languages: []Signal{{Name: "python", Confidence: 0.9}},
 	}
-	candidates := ForDetection(result, []registry.PackSummary{
+	candidates := ForDetection(result, []PackSummary{
 		{
 			Slug:      "source-all-rules",
 			Languages: []string{"python"},
-			Selection: registry.PackSelection{
+			Selection: PackSelection{
 				Kind:        "source",
 				SourceTypes: []string{"indexed"},
 			},
 		},
 		{
 			Slug: "python-security",
-			Selection: registry.PackSelection{
+			Selection: PackSelection{
 				Kind:      "language",
 				Languages: []string{"python"},
 			},

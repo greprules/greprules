@@ -1,11 +1,8 @@
-package recommend
+package rules
 
 import (
 	"sort"
 	"strings"
-
-	"github.com/greprules/greprules/internal/detect"
-	"github.com/greprules/greprules/internal/registry"
 )
 
 type Candidate struct {
@@ -18,17 +15,17 @@ type Candidate struct {
 }
 
 type AgentContext struct {
-	SchemaVersion       string                 `json:"schemaVersion"`
-	Root                string                 `json:"root"`
-	Targets             []string               `json:"targets,omitempty"`
-	Detection           detect.Result          `json:"detection"`
-	Candidates          []Candidate            `json:"candidates"`
-	AvailablePacks      []registry.PackSummary `json:"availablePacks,omitempty"`
-	NeedsAgentSelection bool                   `json:"needsAgentSelection"`
-	Guidance            []string               `json:"guidance"`
+	SchemaVersion       string        `json:"schemaVersion"`
+	Root                string        `json:"root"`
+	Targets             []string      `json:"targets,omitempty"`
+	Detection           Result        `json:"detection"`
+	Candidates          []Candidate   `json:"candidates"`
+	AvailablePacks      []PackSummary `json:"availablePacks,omitempty"`
+	NeedsAgentSelection bool          `json:"needsAgentSelection"`
+	Guidance            []string      `json:"guidance"`
 }
 
-func BuildAgentContext(result detect.Result, available []registry.PackSummary, candidates []Candidate) AgentContext {
+func BuildAgentContext(result Result, available []PackSummary, candidates []Candidate) AgentContext {
 	return AgentContext{
 		SchemaVersion:       "greprules.recommend.agent.v1",
 		Root:                result.Root,
@@ -39,14 +36,14 @@ func BuildAgentContext(result detect.Result, available []registry.PackSummary, c
 		NeedsAgentSelection: len(candidates) == 0,
 		Guidance: []string{
 			"Use candidates when confidence and target context match the user's scan request.",
-			"If candidates are empty or incomplete, inspect targets and availablePacks, choose explicit pack slugs, then run greprules fetch --pack <slug>.",
+			"If candidates are empty or incomplete, inspect targets and availablePacks, choose explicit pack slugs, then run greprules fetch <slug>.",
 			"Prefer target-specific language/framework packs over broad repository packs for edited-file or explicit-target scans.",
 			"Do not invent pack slugs; select only slugs present in availablePacks unless the user explicitly provided a pack slug.",
 		},
 	}
 }
 
-func ForDetection(result detect.Result, available []registry.PackSummary) []Candidate {
+func ForDetection(result Result, available []PackSummary) []Candidate {
 	candidates := make([]Candidate, 0, len(available))
 	for _, pack := range available {
 		if candidate, ok := candidateForPack(result, pack); ok {
@@ -57,7 +54,7 @@ func ForDetection(result detect.Result, available []registry.PackSummary) []Cand
 	return candidates
 }
 
-func candidateForPack(result detect.Result, pack registry.PackSummary) (Candidate, bool) {
+func candidateForPack(result Result, pack PackSummary) (Candidate, bool) {
 	selection := pack.Selection
 	if selection.Kind == "source" || selection.Kind == "manual" {
 		return Candidate{}, false
@@ -148,8 +145,8 @@ func PackIDs(candidates []Candidate) []string {
 	return ids
 }
 
-func bestLanguage(signals []detect.Signal, packLanguages []string) (detect.Signal, bool) {
-	var best detect.Signal
+func bestLanguage(signals []Signal, packLanguages []string) (Signal, bool) {
+	var best Signal
 	for _, signal := range signals {
 		for _, language := range packLanguages {
 			if languageMatches(signal.Name, language) && signal.Confidence >= best.Confidence {
@@ -160,8 +157,8 @@ func bestLanguage(signals []detect.Signal, packLanguages []string) (detect.Signa
 	return best, best.Name != ""
 }
 
-func bestFramework(signals []detect.Signal, packFrameworks []string) (detect.Signal, bool) {
-	var best detect.Signal
+func bestFramework(signals []Signal, packFrameworks []string) (Signal, bool) {
+	var best Signal
 	for _, signal := range signals {
 		for _, framework := range packFrameworks {
 			if normalizeToken(signal.Name) == normalizeToken(framework) && signal.Confidence >= best.Confidence {

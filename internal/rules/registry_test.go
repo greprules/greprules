@@ -1,4 +1,4 @@
-package registry
+package rules
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewUsesProductionAPIRegistryByDefault(t *testing.T) {
-	client := New("")
+	client := NewRegistry("")
 	if client.BaseURL != "https://api.greprules.io" {
 		t.Fatalf("unexpected default registry URL: %q", client.BaseURL)
 	}
@@ -32,7 +32,7 @@ func TestClientFetchesPacksManifestAndTarball(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := New(server.URL)
+	client := NewRegistry(server.URL)
 	packs, err := client.ListPacks(context.Background())
 	if err != nil {
 		t.Fatal(err)

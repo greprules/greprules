@@ -1,4 +1,4 @@
-package scanservice
+package agent
 
 import (
 	"bufio"
@@ -13,17 +13,13 @@ import (
 	"time"
 
 	"github.com/greprules/greprules/internal/config"
-	"github.com/greprules/greprules/internal/gitutil"
 	"github.com/greprules/greprules/internal/opengrep"
-	"github.com/greprules/greprules/internal/output"
-	"github.com/greprules/greprules/internal/projectpath"
-	"github.com/greprules/greprules/internal/runtimeconfig"
+	"github.com/greprules/greprules/internal/utils"
 )
 
-type Options struct {
+type runScanOptions struct {
 	Root            string
 	Changed         bool
-	Full            bool
 	SARIF           bool
 	EngineMode      string
 	OpenGrepPath    string
@@ -36,23 +32,30 @@ type Options struct {
 	Stderr          io.Writer
 }
 
-func Run(ctx context.Context, options Options) error {
+func runScan(ctx context.Context, options runScanOptions) error {
 	if err := ensureOutputRoot(options.Root); err != nil {
 		return err
 	}
-	cfg, err := runtimeconfig.LoadOrDefaultConfig(options.Root)
+	cfg, err := config.LoadEffectiveOrDefault(options.Root)
 	if err != nil {
 		return err
 	}
 	lock, err := config.LoadLock(options.Root)
 	if err != nil {
-		return fmt.Errorf("lockfile missing; run greprules fetch first: %w", err)
+		return fmt.Errorf("lockfile missing; run greprules agent-scan recommend, then fetch explicit packs with greprules fetch <slug>: %w", err)
 	}
-	runtimeInfo, err := runtimeconfig.FromConfigOrLock(lock, cfg, options.EngineMode, options.OpenGrepPath, options.OpenGrepVersion)
+	if missing := config.MissingLockRulePaths(options.Root, lock); len(missing) > 0 {
+		return fmt.Errorf("locked rule pack artifacts are missing: %s; run greprules agent-scan recommend, then fetch explicit packs with greprules fetch <slug>", strings.Join(missing, ", "))
+	}
+	runtimeInfo, err := opengrep.ResolveFromConfig(lock, cfg, opengrep.ConfigOverrides{
+		Mode:    options.EngineMode,
+		Path:    options.OpenGrepPath,
+		Version: options.OpenGrepVersion,
+	})
 	if err != nil {
 		return fmt.Errorf("OpenGrep runtime is not available: %w", err)
 	}
-	lock.Engine = runtimeconfig.LockedEngineFromRuntime(runtimeInfo)
+	lock.Engine = opengrep.LockedEngineFromRuntime(runtimeInfo)
 	if err := config.SaveLock(options.Root, lock); err != nil {
 		return err
 	}
@@ -60,48 +63,31 @@ func Run(ctx context.Context, options Options) error {
 	if options.OutputDir != "" {
 		configuredOutputDir = options.OutputDir
 	}
-	outputDir := projectpath.AbsFromRoot(options.Root, configuredOutputDir)
+	outputDir := utils.AbsFromRoot(options.Root, configuredOutputDir)
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return err
 	}
-	explicitTargets, explicitTargetMode, err := scanTargetsFromFlags(options.Root, options.Targets, options.TargetsFrom)
+	targetSelection, err := resolveScanTargets(targetOptions{
+		Root:        options.Root,
+		Changed:     options.Changed,
+		Targets:     options.Targets,
+		TargetsFrom: options.TargetsFrom,
+	})
 	if err != nil {
 		return err
-	}
-	if explicitTargetMode && options.Full {
-		return errors.New("--full cannot be combined with --target or --targets-from")
-	}
-	targets := []string{"."}
-	changedMode := options.Changed && !options.Full && !explicitTargetMode
-	var changedFiles []string
-	var emptyTargetsWarning string
-	if explicitTargetMode {
-		targets = explicitTargets
-		if len(targets) == 0 {
-			emptyTargetsWarning = "no explicit targets to scan"
-		}
-	} else if changedMode {
-		changedFiles, err = gitutil.ChangedFiles(options.Root)
-		if err != nil {
-			return err
-		}
-		targets = changedFiles
-		if len(targets) == 0 {
-			emptyTargetsWarning = "no changed files to scan"
-		}
 	}
 	jsonPath := filepath.Join(outputDir, "scan.json")
 	sarifPath := filepath.Join(outputDir, "scan.sarif")
 	agentPath := filepath.Join(outputDir, "agent-result.json")
 	startedAt := time.Now().UTC().Format(time.RFC3339)
-	scanConfigs := combinedScanConfigs(options.Root, lock, cfg.OpenGrep.IncludeDefaultRules)
-	result := baseAgentResult(options.Root, lock, runtimeInfo, changedMode, changedFiles, targets, scanConfigs, jsonPath, sarifPath)
+	scanConfigs := config.OpenGrepConfigPaths(options.Root, lock, cfg.OpenGrep.IncludeDefaultRules)
+	result := baseAgentResult(options.Root, lock, runtimeInfo, targetSelection.ChangedMode, targetSelection.ChangedFiles, targetSelection.Targets, scanConfigs, jsonPath, sarifPath)
 	result.Scan.StartedAt = startedAt
-	if emptyTargetsWarning != "" {
+	if targetSelection.EmptyWarning != "" {
 		result.Status = "ok"
-		result.Warnings = append(result.Warnings, emptyTargetsWarning)
+		result.Warnings = append(result.Warnings, targetSelection.EmptyWarning)
 		result.Scan.FinishedAt = time.Now().UTC().Format(time.RFC3339)
-		return output.WriteAgentResult(agentPath, result)
+		return WriteAgentResult(agentPath, result)
 	}
 	if err := removeOutputFile(jsonPath); err != nil {
 		return err
@@ -109,20 +95,20 @@ func Run(ctx context.Context, options Options) error {
 	jsonRunErr := opengrep.RunScan(ctx, runtimeInfo, opengrep.ScanOptions{
 		WorkingDir: options.Root,
 		Configs:    scanConfigs,
-		Targets:    targets,
+		Targets:    targetSelection.Targets,
 		OutputPath: jsonPath,
 		Format:     "json",
 		Stdout:     options.Stdout,
 		Stderr:     options.Stderr,
 	})
-	findings, parseErr := output.FindingsFromOpenGrepJSON(jsonPath)
+	findings, parseErr := FindingsFromOpenGrepJSON(jsonPath)
 	if parseErr != nil {
 		result.Warnings = append(result.Warnings, "could not parse OpenGrep JSON: "+parseErr.Error())
 		if jsonRunErr != nil {
 			result.Status = "failed"
 			result.Errors = append(result.Errors, jsonRunErr.Error())
 			result.Scan.FinishedAt = time.Now().UTC().Format(time.RFC3339)
-			_ = output.WriteAgentResult(agentPath, result)
+			_ = WriteAgentResult(agentPath, result)
 			return jsonRunErr
 		}
 	} else {
@@ -130,7 +116,7 @@ func Run(ctx context.Context, options Options) error {
 		if jsonRunErr != nil {
 			result.Warnings = append(result.Warnings, openGrepRunWarning("JSON run", jsonRunErr))
 		}
-		if warnings, err := output.WarningsFromOpenGrepJSON(jsonPath); err != nil {
+		if warnings, err := WarningsFromOpenGrepJSON(jsonPath); err != nil {
 			result.Warnings = append(result.Warnings, "could not parse OpenGrep diagnostics: "+err.Error())
 		} else {
 			result.Warnings = append(result.Warnings, warnings...)
@@ -143,7 +129,7 @@ func Run(ctx context.Context, options Options) error {
 		if err := opengrep.RunScan(ctx, runtimeInfo, opengrep.ScanOptions{
 			WorkingDir: options.Root,
 			Configs:    scanConfigs,
-			Targets:    targets,
+			Targets:    targetSelection.Targets,
 			OutputPath: sarifPath,
 			Format:     "sarif",
 			Stdout:     options.Stdout,
@@ -156,7 +142,7 @@ func Run(ctx context.Context, options Options) error {
 	}
 	result.Status = "ok"
 	result.Scan.FinishedAt = time.Now().UTC().Format(time.RFC3339)
-	if err := output.WriteAgentResult(agentPath, result); err != nil {
+	if err := WriteAgentResult(agentPath, result); err != nil {
 		return err
 	}
 	if !options.Quiet {
@@ -164,7 +150,7 @@ func Run(ctx context.Context, options Options) error {
 		if writer == nil {
 			writer = os.Stdout
 		}
-		fmt.Fprintln(writer, "wrote", projectpath.RelToRoot(options.Root, agentPath))
+		fmt.Fprintln(writer, "wrote", utils.RelToRoot(options.Root, agentPath))
 	}
 	return nil
 }
@@ -174,17 +160,6 @@ func ensureOutputRoot(root string) error {
 		return errors.New("root is required")
 	}
 	return nil
-}
-
-func combinedScanConfigs(root string, lock config.Lock, includeDefaultRules bool) []string {
-	paths := make([]string, 0, len(lock.Packs))
-	for _, pack := range lock.Packs {
-		paths = append(paths, projectpath.AbsFromRoot(root, pack.RulePath))
-	}
-	if includeDefaultRules {
-		paths = append(paths, "auto")
-	}
-	return paths
 }
 
 func openGrepRunWarning(label string, err error) string {
@@ -202,7 +177,54 @@ func removeOutputFile(path string) error {
 	return err
 }
 
-func scanTargetsFromFlags(root string, targets []string, targetsFrom string) ([]string, bool, error) {
+type targetOptions struct {
+	Root        string
+	Changed     bool
+	Targets     []string
+	TargetsFrom string
+}
+
+type targetSelection struct {
+	Targets      []string
+	ChangedMode  bool
+	ChangedFiles []string
+	ExplicitMode bool
+	EmptyWarning string
+}
+
+func resolveScanTargets(options targetOptions) (targetSelection, error) {
+	explicitTargets, explicitMode, err := targetsFromOptions(options.Root, options.Targets, options.TargetsFrom)
+	if err != nil {
+		return targetSelection{}, err
+	}
+	selection := targetSelection{
+		Targets:      []string{"."},
+		ExplicitMode: explicitMode,
+		ChangedMode:  options.Changed && !explicitMode,
+	}
+	if explicitMode {
+		selection.Targets = explicitTargets
+		if len(selection.Targets) == 0 {
+			selection.EmptyWarning = "no explicit targets to scan"
+		}
+		return selection, nil
+	}
+	if !selection.ChangedMode {
+		return selection, nil
+	}
+	changedFiles, err := utils.ChangedFiles(options.Root)
+	if err != nil {
+		return targetSelection{}, err
+	}
+	selection.Targets = changedFiles
+	selection.ChangedFiles = changedFiles
+	if len(selection.Targets) == 0 {
+		selection.EmptyWarning = "no changed files to scan"
+	}
+	return selection, nil
+}
+
+func targetsFromOptions(root string, targets []string, targetsFrom string) ([]string, bool, error) {
 	rawTargets := append([]string{}, targets...)
 	explicitMode := len(rawTargets) > 0 || targetsFrom != ""
 	if targetsFrom != "" {
@@ -215,7 +237,7 @@ func scanTargetsFromFlags(root string, targets []string, targetsFrom string) ([]
 	if !explicitMode {
 		return nil, false, nil
 	}
-	normalized, err := normalizeScanTargets(root, rawTargets)
+	normalized, err := normalizeTargets(root, rawTargets)
 	if err != nil {
 		return nil, true, err
 	}
@@ -244,11 +266,11 @@ func readTargetsFile(path string) ([]string, error) {
 	return targets, nil
 }
 
-func normalizeScanTargets(root string, rawTargets []string) ([]string, error) {
+func normalizeTargets(root string, rawTargets []string) ([]string, error) {
 	seen := map[string]bool{}
 	var normalized []string
 	for _, raw := range rawTargets {
-		target, err := normalizeScanTarget(root, raw)
+		target, err := normalizeTarget(root, raw)
 		if err != nil {
 			return nil, err
 		}
@@ -262,7 +284,7 @@ func normalizeScanTargets(root string, rawTargets []string) ([]string, error) {
 	return normalized, nil
 }
 
-func normalizeScanTarget(root string, raw string) (string, error) {
+func normalizeTarget(root string, raw string) (string, error) {
 	target := strings.TrimSpace(raw)
 	if target == "" {
 		return "", nil
@@ -287,10 +309,10 @@ func normalizeScanTarget(root string, raw string) (string, error) {
 	return target, nil
 }
 
-func baseAgentResult(root string, lock config.Lock, runtimeInfo opengrep.Runtime, changedMode bool, changedFiles []string, targets []string, scanConfigs []string, jsonPath string, sarifPath string) output.AgentResult {
-	packs := make([]output.PackInfo, 0, len(lock.Packs))
+func baseAgentResult(root string, lock config.Lock, runtimeInfo opengrep.Runtime, changedMode bool, changedFiles []string, targets []string, scanConfigs []string, jsonPath string, sarifPath string) AgentResult {
+	packs := make([]PackInfo, 0, len(lock.Packs))
 	for _, pack := range lock.Packs {
-		packs = append(packs, output.PackInfo{
+		packs = append(packs, PackInfo{
 			ID:         pack.ID,
 			Version:    pack.Version,
 			SHA256:     pack.SHA256,
@@ -298,16 +320,16 @@ func baseAgentResult(root string, lock config.Lock, runtimeInfo opengrep.Runtime
 			TotalRules: pack.TotalRules,
 		})
 	}
-	return output.AgentResult{
+	return AgentResult{
 		SchemaVersion: "greprules.agent.v1",
 		Status:        "running",
-		Repo: output.RepoInfo{
+		Repo: RepoInfo{
 			Root:         root,
 			ChangedMode:  changedMode,
 			ChangedFiles: changedFiles,
 		},
 		Packs: packs,
-		Engine: output.EngineInfo{
+		Engine: EngineInfo{
 			Name:    runtimeInfo.Name,
 			Mode:    runtimeInfo.Mode,
 			Source:  runtimeInfo.Source,
@@ -316,12 +338,12 @@ func baseAgentResult(root string, lock config.Lock, runtimeInfo opengrep.Runtime
 			SHA256:  runtimeInfo.SHA256,
 			Managed: runtimeInfo.Managed,
 		},
-		Scan: output.ScanInfo{
+		Scan: ScanInfo{
 			Targets: targets,
 			Configs: scanConfigs,
 		},
-		Findings:  []output.Finding{},
-		JSONPath:  projectpath.RelToRoot(root, jsonPath),
-		SARIFPath: projectpath.RelToRoot(root, sarifPath),
+		Findings:  []Finding{},
+		JSONPath:  utils.RelToRoot(root, jsonPath),
+		SARIFPath: utils.RelToRoot(root, sarifPath),
 	}
 }

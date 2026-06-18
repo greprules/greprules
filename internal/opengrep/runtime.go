@@ -16,7 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/greprules/greprules/internal/hash"
+	"github.com/greprules/greprules/internal/config"
+	"github.com/greprules/greprules/internal/utils"
 )
 
 type Runtime struct {
@@ -46,12 +47,18 @@ type ResolveOptions struct {
 	CacheRoot string
 }
 
+type ConfigOverrides struct {
+	Mode    string
+	Path    string
+	Version string
+}
+
 func DefaultCacheRoot() (string, error) {
-	root, err := os.UserCacheDir()
+	root, err := config.UserCacheRoot()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, "greprules", "opengrep"), nil
+	return filepath.Join(root, "opengrep"), nil
 }
 
 func Setup(ctx context.Context, options SetupOptions) (Runtime, error) {
@@ -91,7 +98,7 @@ func Setup(ctx context.Context, options SetupOptions) (Runtime, error) {
 	if err := downloadFile(ctx, options.Client, binaryAsset.BrowserDownloadURL, binaryPath, 0o755); err != nil {
 		return Runtime{}, err
 	}
-	sum, err := hash.SHA256File(binaryPath)
+	sum, err := utils.SHA256File(binaryPath)
 	if err != nil {
 		return Runtime{}, err
 	}
@@ -147,6 +154,63 @@ func Resolve(options ResolveOptions) (Runtime, error) {
 	}
 }
 
+func ResolveFromConfig(lock config.Lock, cfg config.Config, overrides ConfigOverrides) (Runtime, error) {
+	mode := cfg.OpenGrep.Mode
+	path := cfg.OpenGrep.Path
+	version := cfg.OpenGrep.Version
+	if overrides.Mode != "" {
+		mode = overrides.Mode
+	}
+	if overrides.Path != "" {
+		path = overrides.Path
+		if overrides.Mode == "" {
+			mode = "path"
+		}
+	}
+	if overrides.Version != "" {
+		version = overrides.Version
+	}
+	if mode == "" {
+		mode = "managed"
+	}
+	if mode == "managed" && lock.Engine != nil && lock.Engine.Path != "" && (lock.Engine.Managed || lock.Engine.Mode == "managed") {
+		if _, err := os.Stat(lock.Engine.Path); err == nil {
+			return Runtime{
+				Name:            lock.Engine.Name,
+				Mode:            firstNonEmpty(lock.Engine.Mode, "managed"),
+				Version:         lock.Engine.Version,
+				Path:            lock.Engine.Path,
+				Source:          lock.Engine.Source,
+				SHA256:          lock.Engine.SHA256,
+				Managed:         lock.Engine.Managed,
+				SignaturePath:   lock.Engine.SignaturePath,
+				CertificatePath: lock.Engine.CertificatePath,
+				DownloadedAt:    lock.Engine.DownloadedAt,
+			}, nil
+		}
+	}
+	return Resolve(ResolveOptions{
+		Mode:    mode,
+		Path:    path,
+		Version: version,
+	})
+}
+
+func LockedEngineFromRuntime(runtimeInfo Runtime) *config.LockedEngine {
+	return &config.LockedEngine{
+		Name:            runtimeInfo.Name,
+		Mode:            runtimeInfo.Mode,
+		Version:         runtimeInfo.Version,
+		Path:            runtimeInfo.Path,
+		Source:          runtimeInfo.Source,
+		SHA256:          runtimeInfo.SHA256,
+		Managed:         runtimeInfo.Managed,
+		SignaturePath:   runtimeInfo.SignaturePath,
+		CertificatePath: runtimeInfo.CertificatePath,
+		DownloadedAt:    runtimeInfo.DownloadedAt,
+	}
+}
+
 func RuntimeFromPath(path string, mode string) (Runtime, error) {
 	resolved, err := filepath.Abs(path)
 	if err != nil {
@@ -166,7 +230,7 @@ func RuntimeFromPath(path string, mode string) (Runtime, error) {
 	if err != nil {
 		return Runtime{}, err
 	}
-	sum, err := hash.SHA256File(resolved)
+	sum, err := utils.SHA256File(resolved)
 	if err != nil {
 		return Runtime{}, err
 	}
@@ -326,6 +390,15 @@ func splitVersion(value string) []int {
 		out = append(out, n)
 	}
 	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func commandVersion(path string) (string, error) {

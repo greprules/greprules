@@ -653,7 +653,7 @@ def readiness_context(root: Path) -> int:
     if not root.is_dir():
         log_msg(root, f"readiness check skipped because project dir is not available: {root}")
         return 0
-    proc = run_cli(["doctor", "--root", str(root), "--format", "json"], root, timeout=180)
+    proc = run_cli(["agent-status", "--root", str(root), "--format", "json"], root, timeout=180)
     if proc.returncode != 0:
         log_msg(root, "readiness check failed: " + (proc.stderr or proc.stdout).strip())
         emit_system_message("greprules readiness check failed: " + (proc.stderr or proc.stdout).strip())
@@ -686,7 +686,7 @@ def readiness_context(root: Path) -> int:
 
     recommended_commands = report.get("recommendedCommands")
     recommended = ", ".join(str(item) for item in recommended_commands) if isinstance(recommended_commands, list) and recommended_commands else "/greprules:configure"
-    recommended = recommended.replace("greprules setup-opengrep", "/greprules:setup").replace("greprules doctor --format json", "/greprules:configure")
+    recommended = recommended.replace("greprules setup-opengrep", "/greprules:setup").replace("greprules agent-status --format json", "/greprules:configure")
 
     rule_pack_guidance = ""
     if not lock_exists:
@@ -715,7 +715,7 @@ def main() -> int:
         return scan_if_dirty(root, payload)
     if mode == "scan-edited":
         return scan_edited(root, payload)
-    if mode in {"readiness", "doctor"}:
+    if mode in {"readiness", "status"}:
         return readiness_context(root)
     sys.stderr.write(f"unknown greprules Claude hook mode: {mode}\n")
     return 2

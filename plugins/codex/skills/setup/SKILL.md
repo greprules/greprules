@@ -18,12 +18,12 @@ Workflow:
      - `greprules@greprules:hooks/hooks.json:post_tool_use:0:0`
      - `greprules@greprules:hooks/hooks.json:stop:0:0`
    - If the plugin is enabled but any trusted hook entry is missing, tell the user that greprules is installed but automatic edited-file scans will not run yet. Ask them to open `/hooks`, trust the greprules hook entries, and start a new Codex session.
-3. Run `greprules doctor --format json` to inspect registry access, OpenGrep runtime readiness, and rule-pack fetch state.
+3. Run `greprules agent-status --format json` to inspect registry access, OpenGrep runtime readiness, and rule-pack fetch state.
 4. If `registry.ok` and `opengrep.active.ok` are true, summarize setup readiness and stop. If `lock.exists` is false, mention only that rule packs have not been fetched yet and scan commands can select packs from target context before fetching.
 5. If OpenGrep is not ready and the user has not already requested a specific runtime, set up managed OpenGrep for the simplest first-run path:
-   - Run `greprules config set opengrep.mode managed --global`.
+   - Run `greprules agent-config set opengrep.mode managed --global`.
    - Run `greprules setup-opengrep`.
-6. If the user asked for system or manual-path OpenGrep instead, hand off to `$greprules-configure` or apply the requested setting through `greprules config set ... --global`.
-7. Run `greprules doctor --format json` again and summarize registry, OpenGrep, and rule-pack state.
+6. If the user asked for system or manual-path OpenGrep instead, hand off to `$greprules-configure` or apply the requested setting through `greprules agent-config set ... --global`.
+7. Run `greprules agent-status --format json` again and summarize registry, OpenGrep, and rule-pack state.
 
 Do not run `greprules fetch` or `greprules scan` from this skill unless the user explicitly asks for that follow-up.

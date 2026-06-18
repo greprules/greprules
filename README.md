@@ -9,7 +9,7 @@ Agent plugin and CLI for fetching SAST rule packs from greprules.io and scanning
 
 greprules is designed for local coding agents first. The Claude Code, Codex, and Hermes plugins give agents commands or skills for first-run setup, configuring OpenGrep, selecting rule packs from code context, fetching those packs, and scanning local code changes. The Go CLI is the deterministic local runtime behind those commands.
 
-greprules is maintained in the greprules GitHub organization with support from Provally. Provally operates the hosted greprules.io registry and API used by the default configuration. Normal scans fetch rule packs from greprules.io, run OpenGrep locally, and write results to local `.greprules/` files.
+greprules is maintained in the greprules GitHub organization with support from Provally. Provally operates the hosted greprules.io registry and API used by the default configuration. Normal scans fetch rule packs from greprules.io, run OpenGrep locally, and keep standalone project locks in user state. Agent plugin scans may also write provider-specific results under local `.greprules/` paths.
 
 ## Quick Start
 
@@ -86,19 +86,21 @@ OpenGrep does the actual scanning. greprules keeps runtime selection explicit so
 | `system` | You already have `opengrep` on `PATH` and want to use it. |
 | `path` | You want to point greprules at a specific OpenGrep executable. |
 
-Use your agent's configure command to choose a runtime. From a shell, the same settings are available through:
+For standalone CLI usage, the default managed runtime is installed automatically by `greprules scan` or explicitly with `greprules setup-opengrep`. Agent plugins expose runtime configuration through their `/greprules configure` or `$greprules-configure` workflows.
+
+For agent/plugin automation only, the underlying settings command is:
 
 ```bash
-greprules config set opengrep.mode system --global
-greprules config set opengrep.mode managed --global
-greprules config set opengrep.mode path --global
-greprules config set opengrep.path /absolute/path/to/opengrep --global
+greprules agent-config set opengrep.mode system --global
+greprules agent-config set opengrep.mode managed --global
+greprules agent-config set opengrep.mode path --global
+greprules agent-config set opengrep.path /absolute/path/to/opengrep --global
 ```
 
 By default, greprules scans fetched greprules.io packs only. To also include OpenGrep's default auto-selected rules:
 
 ```bash
-greprules config set opengrep.includeDefaultRules true --global
+greprules agent-config set opengrep.includeDefaultRules true --global
 ```
 
 Hook behavior is configured per agent plugin, not through the shared CLI config:
@@ -125,55 +127,52 @@ Each file uses the same keys:
 The important files are:
 
 ```text
+user state: projects/<project-key>/lock.json
+user cache: packs/<slug>/<sha>/...
 .greprules/config.yaml
-.greprules/lock.json
-.greprules/out/agent-result.json
-.greprules/out/scan.sarif
 .greprules/plugin-data/<provider>/sessions/<session-id>/out/agent-result.json
 ```
 
-Normal CLI scans write `.greprules/out/agent-result.json`. Plugin edited-file scans write session-local results under `.greprules/plugin-data/<provider>/sessions/<session-id>/out/agent-result.json`; agents should read the full result path reported in the scan summary. The agent result contains the scan summary, findings, warnings, selected OpenGrep runtime, and rule pack metadata. `.greprules/lock.json` pins fetched pack artifacts and records the selected scan runtime.
+Standalone CLI scans follow OpenGrep output behavior: stdout and files are controlled by the OpenGrep arguments you pass, such as `--json`, `--sarif`, and `--output`. Standalone project locks are stored in user state keyed by the canonical project root, while rule pack artifacts are stored in user cache and reused across projects. Agent scans use the hidden `agent-scan` command and write structured results under `.greprules/out/agent-result.json` or session-local plugin output paths.
 
 Generated local paths are ignored automatically in git repositories:
 
 ```text
-.greprules/cache/
 .greprules/out/
 .greprules/plugin-data/
 .greprules/config.local.json
 ```
 
-Shared files such as `.greprules/config.yaml` and `.greprules/lock.json` are not ignored automatically.
+Shared files such as `.greprules/config.yaml` are not ignored automatically.
 
 ## Standalone CLI
 
-The CLI is useful when you want the same scan behavior outside an agent.
+The CLI is useful when you want greprules.io rule packs with normal OpenGrep scan behavior.
 
 ```bash
 greprules scan .
 ```
 
-On first run, `scan` detects the target language/framework context, selects matching greprules.io rule packs, fetches and pins them in `.greprules/lock.json`, installs managed OpenGrep when needed, and then runs OpenGrep locally. Existing lockfiles are reused so pinned rule packs stay reproducible.
+On first run, `scan` detects the target language/framework context, selects matching greprules.io rule packs, fetches and pins them in user state, installs managed OpenGrep when needed, and then runs `opengrep scan` with the selected rule packs injected as `--config` arguments. Existing project locks are reused so pinned rule packs stay reproducible on the same machine. OpenGrep arguments pass through unchanged.
 
 More commands:
 
 ```bash
 greprules scan --changed
-greprules detect --format json
-greprules config inspect --format json
-greprules recommend --format json --agent --target path/to/file
-greprules fetch
+greprules fetch python-security
 greprules setup-opengrep
-greprules scan --target path/to/file
-greprules scan --targets-from .greprules/out/targets.txt
-greprules scan --full
-greprules scan . --no-auto-fetch
-greprules scan . --no-auto-setup
-greprules scan . --explain-selection
+greprules scan path/to/file
+greprules scan . --json
+greprules scan . --sarif --output result.sarif
+greprules scan . --severity ERROR
+greprules scan . --no-prepare
+greprules scan . --verbose
 greprules cleanup --plugin-cache --dry-run
 ```
 
-## Configuration Reference
+## Advanced Agent Configuration Reference
+
+Standalone CLI users normally do not need to edit greprules config. `scan` prepares the managed runtime, selects rule packs, fetches missing packs, and then delegates output behavior to OpenGrep. Use this reference only for agent/plugin automation or local development.
 
 The production registry is:
 
@@ -181,7 +180,7 @@ The production registry is:
 https://api.greprules.io
 ```
 
-Configuration is merged in this order:
+Agent configuration is merged in this order:
 
 ```text
 CLI flags
@@ -223,7 +222,7 @@ For safety, `opengrep.path` from shared `.greprules/config.yaml` is ignored. Put
 For local worker development only:
 
 ```bash
-GREPRULES_REGISTRY=http://127.0.0.1:8790 greprules config inspect --format json
+GREPRULES_REGISTRY=http://127.0.0.1:8790 greprules agent-status --format json
 ```
 
 ## Plugin Runtime

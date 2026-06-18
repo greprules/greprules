@@ -14,9 +14,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/greprules/greprules/internal/agent"
+	"github.com/greprules/greprules/internal/cmdutil"
 	"github.com/greprules/greprules/internal/config"
 	"github.com/greprules/greprules/internal/doctor"
-	"github.com/greprules/greprules/internal/recommend"
+	"github.com/greprules/greprules/internal/standalone"
 )
 
 func TestRunFetchWritesLockAndCache(t *testing.T) {
@@ -35,8 +37,13 @@ func TestRunFetchWritesLockAndCache(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	cfg := config.DefaultConfig()
+	cfg.Registry = server.URL
+	if err := config.SaveLocalConfig(root, cfg); err != nil {
+		t.Fatal(err)
+	}
 
-	if err := runFetch(t.Context(), []string{"--root", root, "--registry", server.URL, "--pack", "go-security"}); err != nil {
+	if err := standalone.RunFetch(t.Context(), []string{"--root", root, "go-security"}); err != nil {
 		t.Fatal(err)
 	}
 	lock, err := config.LoadLock(root)
@@ -46,77 +53,22 @@ func TestRunFetchWritesLockAndCache(t *testing.T) {
 	if len(lock.Packs) != 1 || lock.Packs[0].ID != "go-security" {
 		t.Fatalf("unexpected lock: %#v", lock)
 	}
-	if _, err := os.Stat(filepath.Join(root, lock.Packs[0].RulePath, "example.yaml")); err != nil {
+	rulePath := lock.Packs[0].RulePath
+	if !filepath.IsAbs(rulePath) {
+		rulePath = filepath.Join(root, rulePath)
+	}
+	if _, err := os.Stat(filepath.Join(rulePath, "example.yaml")); err != nil {
 		t.Fatal(err)
 	}
+	assertNoFile(t, filepath.Join(root, ".greprules", "lock.json"))
+	assertNoFile(t, filepath.Join(root, ".greprules", "cache"))
 }
 
-func TestRunRecommendAgentContextUsesTargetSignals(t *testing.T) {
+func TestRunFetchRequiresExplicitPack(t *testing.T) {
 	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "pyproject.toml"), "[project]\ndependencies = [\"fastapi\"]\n")
-	writeFile(t, filepath.Join(root, "src", "main.py"), "from fastapi import FastAPI\napp = FastAPI()\n")
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/api/packs" {
-			w.Header().Set("content-type", "application/json")
-			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"python-web-security","name":"Python Web Security","languages":["python"],"selection":{"kind":"framework","languages":["python"],"frameworks":["fastapi"],"source_types":[],"tags":[]}}]}`))
-			return
-		}
-		http.NotFound(w, r)
-	}))
-	t.Cleanup(server.Close)
-
-	var stdout bytes.Buffer
-	withStdout(t, &stdout, func() {
-		if err := runRecommend(t.Context(), []string{"--root", root, "--registry", server.URL, "--format", "json", "--agent", "--target", "src/main.py"}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	var context recommend.AgentContext
-	if err := json.Unmarshal(stdout.Bytes(), &context); err != nil {
-		t.Fatalf("expected agent context JSON, got %q: %v", stdout.String(), err)
-	}
-	if context.SchemaVersion != "greprules.recommend.agent.v1" {
-		t.Fatalf("unexpected schema: %#v", context)
-	}
-	if got := strings.Join(recommend.PackIDs(context.Candidates), ","); got != "python-web-security" {
-		t.Fatalf("expected python web candidate, got %#v", context.Candidates)
-	}
-	if len(context.AvailablePacks) != 1 || context.AvailablePacks[0].Slug != "python-web-security" {
-		t.Fatalf("expected available packs in agent context, got %#v", context.AvailablePacks)
-	}
-}
-
-func TestRunFetchUsesTargetAwareRecommendation(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "pyproject.toml"), "[project]\ndependencies = [\"fastapi\"]\n")
-	writeFile(t, filepath.Join(root, "src", "main.py"), "from fastapi import FastAPI\napp = FastAPI()\n")
-	tarball := makePackTarball(t)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/packs":
-			w.Header().Set("content-type", "application/json")
-			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"python-web-security","name":"Python Web Security","languages":["python"],"selection":{"kind":"framework","languages":["python"],"frameworks":["fastapi"],"source_types":[],"tags":[]}}]}`))
-		case "/api/packs/python-web-security/manifest.json":
-			w.Header().Set("content-type", "application/json")
-			_, _ = w.Write([]byte(`{"schema_version":1,"slug":"python-web-security","build_id":"build-1","total_rules":1,"languages":["python"],"rules":[{"slug":"example","yaml_path":"rules/example.yaml"}]}`))
-		case "/api/packs/python-web-security/latest.tar.gz":
-			w.Header().Set("content-type", "application/gzip")
-			_, _ = w.Write(tarball)
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(server.Close)
-
-	if err := runFetch(t.Context(), []string{"--root", root, "--registry", server.URL, "--target", "src/main.py"}); err != nil {
-		t.Fatal(err)
-	}
-	lock, err := config.LoadLock(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(lock.Packs) != 1 || lock.Packs[0].ID != "python-web-security" {
-		t.Fatalf("unexpected lock: %#v", lock)
+	err := standalone.RunFetch(t.Context(), []string{"--root", root})
+	if err == nil || !strings.Contains(err.Error(), "usage: greprules fetch <PACK>") {
+		t.Fatalf("expected explicit pack usage error, got %v", err)
 	}
 }
 
@@ -145,19 +97,13 @@ func TestRunScanAutoFetchesMissingLockForStandalone(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	fakeOpenGrep := filepath.Join(root, "fake-opengrep")
+	argsLog := filepath.Join(root, "opengrep-args.txt")
 	writeFile(t, fakeOpenGrep, `#!/bin/sh
 if [ "$1" = "--version" ]; then
   printf 'opengrep 9.8.7\n'
   exit 0
 fi
-out=""
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --output) shift; out="$1" ;;
-  esac
-  shift
-done
-printf '{"results":[]}\n' > "$out"
+printf '%s\n' "$@" > "`+argsLog+`"
 `)
 	if err := os.Chmod(fakeOpenGrep, 0o755); err != nil {
 		t.Fatal(err)
@@ -171,16 +117,22 @@ printf '{"results":[]}\n' > "$out"
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer
-	withStdout(t, &stdout, func() {
-		if err := runScan(t.Context(), []string{"--root", root, "--target", "src/main.py", "--sarif=false", "--explain-selection"}); err != nil {
-			t.Fatal(err)
-		}
-	})
-	output := stdout.String()
-	for _, want := range []string{"detected languages:", "python-web-security", "fetched python-web-security", "wrote .greprules/out/agent-result.json"} {
+	var stderr bytes.Buffer
+	if err := standalone.RunScanWithOptions(t.Context(), []string{"--root", root, "--verbose", "src/main.py", "--json", "--severity", "ERROR"}, standalone.ScanOptions{
+		Stdout:      &stdout,
+		Stderr:      &stderr,
+		AutoPrepare: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	output := stderr.String()
+	for _, want := range []string{"detected languages:", "python-web-security", "fetched python-web-security"} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected %q in scan output, got %q", want, output)
 		}
+	}
+	if strings.Contains(stdout.String(), "fetched") || strings.Contains(stdout.String(), "detected languages") {
+		t.Fatalf("expected greprules preparation logs on stderr, got stdout %q", stdout.String())
 	}
 	lock, err := config.LoadLock(root)
 	if err != nil {
@@ -189,10 +141,122 @@ printf '{"results":[]}\n' > "$out"
 	if len(lock.Packs) != 1 || lock.Packs[0].ID != "python-web-security" {
 		t.Fatalf("unexpected lock: %#v", lock)
 	}
-	assertFileExists(t, filepath.Join(root, ".greprules", "out", "agent-result.json"))
+	assertNoFile(t, filepath.Join(root, ".greprules", "out", "agent-result.json"))
+	argsData, err := os.ReadFile(argsLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"scan\n", "--config\n", "src/main.py\n", "--json\n", "--severity\n", "ERROR\n"} {
+		if !strings.Contains(string(argsData), want) {
+			t.Fatalf("expected OpenGrep arg %q in %q", want, string(argsData))
+		}
+	}
 }
 
-func TestRunScanNoAutoFetchKeepsMissingLockFailure(t *testing.T) {
+func TestRunScanRefetchesMissingLockedArtifacts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake runtime is unix-only")
+	}
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "pyproject.toml"), "[project]\ndependencies = [\"fastapi\"]\n")
+	writeFile(t, filepath.Join(root, "src", "main.py"), "from fastapi import FastAPI\napp = FastAPI()\n")
+	tarball := makePackTarball(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/packs":
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"python-web-security","name":"Python Web Security","languages":["python"],"selection":{"kind":"framework","languages":["python"],"frameworks":["fastapi"],"source_types":[],"tags":[]}}]}`))
+		case "/api/packs/python-web-security/manifest.json":
+			w.Header().Set("content-type", "application/json")
+			_, _ = w.Write([]byte(`{"schema_version":1,"slug":"python-web-security","build_id":"build-1","total_rules":1,"languages":["python"],"rules":[{"slug":"example","yaml_path":"rules/example.yaml"}]}`))
+		case "/api/packs/python-web-security/latest.tar.gz":
+			w.Header().Set("content-type", "application/gzip")
+			_, _ = w.Write(tarball)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	fakeOpenGrep := filepath.Join(root, "fake-opengrep")
+	writeFile(t, fakeOpenGrep, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'opengrep 9.8.7\n'
+  exit 0
+fi
+exit 0
+`)
+	if err := os.Chmod(fakeOpenGrep, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.Registry = server.URL
+	cfg.OpenGrep.Mode = "path"
+	cfg.OpenGrep.Managed = false
+	cfg.OpenGrep.Path = fakeOpenGrep
+	if err := config.SaveLocalConfig(root, cfg); err != nil {
+		t.Fatal(err)
+	}
+	staleRulePath := filepath.Join(root, "missing-cache", "rules")
+	if err := config.SaveLock(root, config.Lock{
+		SchemaVersion: config.LockSchemaVersion,
+		Registry:      server.URL,
+		Packs: []config.LockedPack{{
+			ID:         "python-web-security",
+			Version:    "old",
+			SHA256:     "stale",
+			RulePath:   staleRulePath,
+			TotalRules: 1,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderr bytes.Buffer
+	if err := standalone.RunScanWithOptions(t.Context(), []string{"--root", root, "src/main.py"}, standalone.ScanOptions{
+		Stderr:      &stderr,
+		AutoPrepare: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "fetched python-web-security") {
+		t.Fatalf("expected stale lock to be refreshed, got stderr %q", stderr.String())
+	}
+	lock, err := config.LoadLock(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lock.Packs) != 1 || lock.Packs[0].RulePath == staleRulePath {
+		t.Fatalf("expected refreshed lock, got %#v", lock)
+	}
+	if _, err := os.Stat(filepath.Join(lock.Packs[0].RulePath, "example.yaml")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunScanNoPrepareRejectsMissingLockedArtifacts(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "main.go"), "package main\n")
+	if err := config.SaveLock(root, config.Lock{
+		SchemaVersion: config.LockSchemaVersion,
+		Registry:      "https://example.test",
+		Packs: []config.LockedPack{{
+			ID:         "go-security",
+			Version:    "old",
+			SHA256:     "stale",
+			RulePath:   filepath.Join(root, "missing-cache", "rules"),
+			TotalRules: 1,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	err := standalone.RunScan(t.Context(), []string{"--root", root, "--no-prepare"})
+	if err == nil || !strings.Contains(err.Error(), "locked rule pack artifacts are missing") {
+		t.Fatalf("expected missing artifact error, got %v", err)
+	}
+}
+
+func TestRunScanNoPrepareKeepsMissingLockFailure(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script fake runtime is unix-only")
 	}
@@ -217,40 +281,49 @@ printf '{"results":[]}\n'
 		t.Fatal(err)
 	}
 
-	err := runScan(t.Context(), []string{"--root", root, "--full", "--sarif=false", "--no-auto-fetch"})
+	err := standalone.RunScan(t.Context(), []string{"--root", root, "--no-prepare"})
 	if err == nil || !strings.Contains(err.Error(), "lockfile missing") {
 		t.Fatalf("expected missing lockfile error, got %v", err)
 	}
 }
 
-func TestRunScanWritesAgentResultWithFakeOpenGrep(t *testing.T) {
+func TestStandaloneScanPassesUnknownFlagsToOpenGrep(t *testing.T) {
+	request, _, err := standalone.ParseScanRequest([]string{"--targets-from", "targets.txt"}, standalone.ScanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(request.OpenGrepArgs, " ") != "--targets-from targets.txt" {
+		t.Fatalf("expected unknown flags to pass through to OpenGrep, got %#v", request.OpenGrepArgs)
+	}
+}
+
+func TestStandaloneInitCommandRemoved(t *testing.T) {
+	if code := Execute([]string{"init"}, "test"); code == 0 {
+		t.Fatal("expected init to be removed from standalone CLI")
+	}
+}
+
+func TestStandaloneDoctorCommandRemoved(t *testing.T) {
+	if code := Execute([]string{"doctor"}, "test"); code == 0 {
+		t.Fatal("expected doctor to be removed from standalone CLI")
+	}
+}
+
+func TestRunScanPassthroughUsesLockedPackConfigsAndUserArgs(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script fake runtime is unix-only")
 	}
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.test\n")
 	writeFile(t, filepath.Join(root, ".greprules", "cache", "packs", "go-security", "rules", "example.yaml"), "rules: []\n")
+	argsLog := filepath.Join(root, "opengrep-args.txt")
 	fakeOpenGrep := filepath.Join(root, "fake-opengrep")
 	writeFile(t, fakeOpenGrep, `#!/bin/sh
 if [ "$1" = "--version" ]; then
   printf 'opengrep 9.8.7\n'
   exit 0
 fi
-out=""
-fmt="json"
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --output) shift; out="$1" ;;
-    --sarif) fmt="sarif" ;;
-    --json) fmt="json" ;;
-  esac
-  shift
-done
-if [ "$fmt" = "sarif" ]; then
-  printf '{"version":"2.1.0","runs":[]}\n' > "$out"
-else
-  printf '{"results":[{"check_id":"greprules.example","path":"main.go","start":{"line":1,"col":1},"end":{"line":1,"col":2},"extra":{"message":"example","severity":"WARNING","metadata":{"license":"MIT"}}}]}\n' > "$out"
-fi
+printf '%s\n' "$@" > "`+argsLog+`"
 `)
 	if err := os.Chmod(fakeOpenGrep, 0o755); err != nil {
 		t.Fatal(err)
@@ -277,26 +350,19 @@ fi
 	if err := config.SaveLock(root, lock); err != nil {
 		t.Fatal(err)
 	}
-	if err := runScan(t.Context(), []string{"--root", root, "--full"}); err != nil {
+	if err := standalone.RunScan(t.Context(), []string{"--root", root, ".", "--sarif", "--output", "result.sarif"}); err != nil {
 		t.Fatal(err)
 	}
-	agentPath := filepath.Join(root, ".greprules", "out", "agent-result.json")
-	data, err := os.ReadFile(agentPath)
+	argsData, err := os.ReadFile(argsLog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var result struct {
-		Status   string `json:"status"`
-		Findings []struct {
-			RuleID string `json:"ruleId"`
-		} `json:"findings"`
+	for _, want := range []string{"scan\n", "--config\n", "auto\n", ".\n", "--sarif\n", "--output\n", "result.sarif\n"} {
+		if !strings.Contains(string(argsData), want) {
+			t.Fatalf("expected OpenGrep arg %q in %q", want, string(argsData))
+		}
 	}
-	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatal(err)
-	}
-	if result.Status != "ok" || len(result.Findings) != 1 || result.Findings[0].RuleID != "greprules.example" {
-		t.Fatalf("unexpected agent result: %s", string(data))
-	}
+	assertNoFile(t, filepath.Join(root, ".greprules", "out", "agent-result.json"))
 	updatedLock, err := config.LoadLock(root)
 	if err != nil {
 		t.Fatal(err)
@@ -306,7 +372,7 @@ fi
 	}
 }
 
-func TestRunScanUsesExplicitTargetsFromFile(t *testing.T) {
+func TestRunScanUsesExplicitPositionalTargets(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script fake runtime is unix-only")
 	}
@@ -314,8 +380,6 @@ func TestRunScanUsesExplicitTargetsFromFile(t *testing.T) {
 	writeFile(t, filepath.Join(root, "a.go"), "package main\n")
 	writeFile(t, filepath.Join(root, "b.go"), "package main\n")
 	writeFile(t, filepath.Join(root, ".greprules", "cache", "packs", "go-security", "rules", "example.yaml"), "rules: []\n")
-	targetsFrom := filepath.Join(root, "targets.txt")
-	writeFile(t, targetsFrom, "b.go\na.go\nb.go\n\n")
 	targetLog := filepath.Join(root, "opengrep-targets.txt")
 	configLog := filepath.Join(root, "opengrep-configs.txt")
 	fakeOpenGrep := filepath.Join(root, "fake-opengrep")
@@ -324,17 +388,12 @@ if [ "$1" = "--version" ]; then
   printf 'opengrep 9.8.7\n'
   exit 0
 fi
-out=""
-fmt="json"
 targets=""
 configs=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     scan) ;;
     --config) shift; configs="${configs}${configs:+ }$1" ;;
-    --output) shift; out="$1" ;;
-    --json) fmt="json" ;;
-    --sarif) fmt="sarif" ;;
     --*) ;;
     *) targets="${targets}${targets:+ }$1" ;;
   esac
@@ -342,11 +401,6 @@ while [ "$#" -gt 0 ]; do
 done
 printf '%s\n' "$targets" >> "`+targetLog+`"
 printf '%s\n' "$configs" >> "`+configLog+`"
-if [ "$fmt" = "sarif" ]; then
-  printf '{"version":"2.1.0","runs":[]}\n' > "$out"
-else
-  printf '{"results":[]}\n' > "$out"
-fi
 `)
 	if err := os.Chmod(fakeOpenGrep, 0o755); err != nil {
 		t.Fatal(err)
@@ -374,37 +428,15 @@ fi
 		t.Fatal(err)
 	}
 
-	if err := runScan(t.Context(), []string{"--root", root, "--targets-from", targetsFrom}); err != nil {
+	if err := standalone.RunScan(t.Context(), []string{"--root", root, "b.go", "a.go", "b.go"}); err != nil {
 		t.Fatal(err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(root, ".greprules", "out", "agent-result.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var result struct {
-		Repo struct {
-			ChangedMode  bool     `json:"changedMode"`
-			ChangedFiles []string `json:"changedFiles"`
-		} `json:"repo"`
-		Scan struct {
-			Targets []string `json:"targets"`
-		} `json:"scan"`
-	}
-	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatal(err)
-	}
-	if result.Repo.ChangedMode || len(result.Repo.ChangedFiles) != 0 {
-		t.Fatalf("expected explicit targets not git changed mode, got %s", string(data))
-	}
-	if strings.Join(result.Scan.Targets, ",") != "a.go,b.go" {
-		t.Fatalf("unexpected scan targets: %s", string(data))
-	}
 	logData, err := os.ReadFile(targetLog)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(logData), "a.go b.go") {
+	if !strings.Contains(string(logData), "b.go a.go b.go") {
 		t.Fatalf("expected explicit targets in opengrep invocation, got %q", string(logData))
 	}
 	configData, err := os.ReadFile(configLog)
@@ -414,9 +446,7 @@ fi
 	if !strings.Contains(string(configData), " auto") {
 		t.Fatalf("expected opengrep default rule config in invocation, got %q", string(configData))
 	}
-	if !strings.Contains(string(data), "\"configs\"") || !strings.Contains(string(data), "\"auto\"") {
-		t.Fatalf("expected agent result to record scan configs, got %s", string(data))
-	}
+	assertNoFile(t, filepath.Join(root, ".greprules", "out", "agent-result.json"))
 }
 
 func TestRunScanUsesProvidedRootByDefaultInsideParentGitRepo(t *testing.T) {
@@ -435,21 +465,14 @@ if [ "$1" = "--version" ]; then
   printf 'opengrep 9.8.7\n'
   exit 0
 fi
-out=""
-while [ "$#" -gt 0 ]; do
-  case "$1" in
-    --output) shift; out="$1" ;;
-  esac
-  shift
-done
-printf '{"results":[]}\n' > "$out"
+exit 0
 `)
 
-	if err := runScan(t.Context(), []string{"--root", root, "--target", filepath.Join(root, "app.mjs"), "--sarif=false"}); err != nil {
+	if err := standalone.RunScan(t.Context(), []string{"--root", root, filepath.Join(root, "app.mjs")}); err != nil {
 		t.Fatal(err)
 	}
 
-	assertFileExists(t, filepath.Join(root, ".greprules", "out", "agent-result.json"))
+	assertNoFile(t, filepath.Join(root, ".greprules", "out", "agent-result.json"))
 	assertNoFile(t, filepath.Join(parent, ".greprules", "lock.json"))
 }
 
@@ -462,14 +485,14 @@ func TestResolveCommandRootDiscoversGitRootOnlyForChangedMode(t *testing.T) {
 	if err := os.MkdirAll(child, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	exact, err := resolveCommandRoot(child, false)
+	exact, err := cmdutil.ResolveCommandRoot(child, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if exact != child {
 		t.Fatalf("expected provided root by default, got %s", exact)
 	}
-	changedRoot, err := resolveCommandRoot(child, true)
+	changedRoot, err := cmdutil.ResolveCommandRoot(child, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -501,17 +524,14 @@ if [ "$1" = "--version" ]; then
   printf 'opengrep 9.8.7\n'
   exit 0
 fi
-out=""
 configs=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --config) shift; configs="${configs}${configs:+|}$1" ;;
-    --output) shift; out="$1" ;;
   esac
   shift
 done
 printf '%s\n' "$configs" > "`+configLog+`"
-printf '{"results":[]}\n' > "$out"
 `)
 	if err := os.Chmod(fakeOpenGrep, 0o755); err != nil {
 		t.Fatal(err)
@@ -548,7 +568,7 @@ printf '{"results":[]}\n' > "$out"
 		t.Fatal(err)
 	}
 
-	if err := runScan(t.Context(), []string{"--root", root, "--full", "--sarif=false"}); err != nil {
+	if err := standalone.RunScan(t.Context(), []string{"--root", root}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -570,7 +590,7 @@ printf '{"results":[]}\n' > "$out"
 	}
 }
 
-func TestRunScanKeepsFindingsWhenOpenGrepReturnsPartialError(t *testing.T) {
+func TestAgentScanKeepsFindingsWhenOpenGrepReturnsPartialError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell script fake runtime is unix-only")
 	}
@@ -618,9 +638,12 @@ exit 2
 		t.Fatal(err)
 	}
 
-	if err := runScan(t.Context(), []string{"--root", root, "--full", "--sarif=false"}); err != nil {
-		t.Fatal(err)
-	}
+	var stdout bytes.Buffer
+	withStdout(t, &stdout, func() {
+		if err := agent.RunScanCommand(t.Context(), []string{"scan", "--root", root, "--format", "json", "--no-sarif"}); err != nil {
+			t.Fatal(err)
+		}
+	})
 
 	data, err := os.ReadFile(filepath.Join(root, ".greprules", "out", "agent-result.json"))
 	if err != nil {
@@ -649,34 +672,19 @@ exit 2
 	}
 }
 
-func TestRunInitWritesSystemEngineConfig(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "go.mod"), "module example.test\n")
-	if err := runInit([]string{"--root", root, "--engine", "system"}); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := config.LoadConfig(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.OpenGrep.Mode != "system" || cfg.OpenGrep.Managed {
-		t.Fatalf("expected system engine config, got %#v", cfg.OpenGrep)
-	}
-}
-
-func TestConfigSetGlobalAndInspect(t *testing.T) {
+func TestAgentConfigSetGlobalAndInspect(t *testing.T) {
 	root := t.TempDir()
 	userConfig := filepath.Join(t.TempDir(), "config.json")
 	t.Setenv("GREPRULES_USER_CONFIG", userConfig)
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.test\n")
 
-	if err := runConfigSet([]string{"--root", root, "--global", "opengrep.mode", "system"}); err != nil {
+	if err := agent.RunConfigSet([]string{"--root", root, "--global", "opengrep.mode", "system"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runConfigSet([]string{"--root", root, "registry", "http://127.0.0.1:8790", "--global"}); err != nil {
+	if err := agent.RunConfigSet([]string{"--root", root, "registry", "http://127.0.0.1:8790", "--global"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := runConfigSet([]string{"--root", root, "opengrep.includeDefaultRules", "true", "--global"}); err != nil {
+	if err := agent.RunConfigSet([]string{"--root", root, "opengrep.includeDefaultRules", "true", "--global"}); err != nil {
 		t.Fatal(err)
 	}
 	resolution, err := config.LoadEffectiveConfig(root)
@@ -699,7 +707,7 @@ func TestAgentConfigKeysUnsupported(t *testing.T) {
 	t.Setenv("GREPRULES_USER_CONFIG", userConfig)
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.test\n")
 
-	if err := runConfigSet([]string{"--root", root, "agent.autoScan", "true", "--global"}); err == nil {
+	if err := agent.RunConfigSet([]string{"--root", root, "agent.autoScan", "true", "--global"}); err == nil {
 		t.Fatal("expected agent.autoScan to be unsupported")
 	}
 }
@@ -760,7 +768,7 @@ printf '{"results":[]}\n'
 func TestRepoConfigOpenGrepPathIsIgnored(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.test\n")
-	if err := runConfigSet([]string{"--root", root, "--repo", "opengrep.path", "/tmp/opengrep"}); err == nil {
+	if err := agent.RunConfigSet([]string{"--root", root, "--repo", "opengrep.path", "/tmp/opengrep"}); err == nil {
 		t.Fatal("expected repo opengrep.path to be rejected")
 	}
 	if err := os.MkdirAll(filepath.Join(root, ".greprules"), 0o755); err != nil {
@@ -791,10 +799,10 @@ func TestEnsureGreprulesGitignoreAddsEntryOnce(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(root, ".gitignore"), "node_modules/\n")
 
-	if err := ensureGreprulesGitignore(root); err != nil {
+	if err := cmdutil.EnsureGreprulesGitignore(root); err != nil {
 		t.Fatal(err)
 	}
-	if err := ensureGreprulesGitignore(root); err != nil {
+	if err := cmdutil.EnsureGreprulesGitignore(root); err != nil {
 		t.Fatal(err)
 	}
 
@@ -802,8 +810,8 @@ func TestEnsureGreprulesGitignoreAddsEntryOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines := gitignoreEffectiveLines(data)
-	for _, entry := range greprulesGitignoreEntries {
+	lines := cmdutil.GitignoreEffectiveLines(data)
+	for _, entry := range cmdutil.GreprulesGitignoreEntries {
 		if !lines[entry] {
 			t.Fatalf("expected %s in .gitignore, got %q", entry, string(data))
 		}
@@ -811,7 +819,7 @@ func TestEnsureGreprulesGitignoreAddsEntryOnce(t *testing.T) {
 			t.Fatalf("expected one %s entry, got %d in %q", entry, count, string(data))
 		}
 	}
-	if lines[".greprules/"] || lines[".greprules/config.yaml"] || lines[".greprules/lock.json"] {
+	if lines[".greprules/"] || lines[".greprules/config.yaml"] {
 		t.Fatalf("should not ignore shared greprules files, got %q", string(data))
 	}
 }
@@ -823,13 +831,13 @@ func TestRunCleanupRemovesSelectedUserPaths(t *testing.T) {
 	userConfig := filepath.Join(t.TempDir(), "config.json")
 	t.Setenv("GREPRULES_USER_CONFIG", userConfig)
 	writeFile(t, userConfig, "{}\n")
-	cacheRoot, err := greprulesPluginCacheRoot()
+	cacheRoot, err := standalone.PluginCacheRoot()
 	if err != nil {
 		t.Fatal(err)
 	}
 	writeFile(t, filepath.Join(cacheRoot, "greprules", "v0.1.0", "greprules"), "binary")
 
-	if err := runCleanup([]string{"--config", "--plugin-cache", "--dry-run"}); err != nil {
+	if err := standalone.RunCleanup([]string{"--config", "--plugin-cache", "--dry-run"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(userConfig); err != nil {
@@ -839,7 +847,7 @@ func TestRunCleanupRemovesSelectedUserPaths(t *testing.T) {
 		t.Fatalf("dry run should keep cache: %v", err)
 	}
 
-	if err := runCleanup([]string{"--config", "--plugin-cache"}); err != nil {
+	if err := standalone.RunCleanup([]string{"--config", "--plugin-cache"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(userConfig); !os.IsNotExist(err) {

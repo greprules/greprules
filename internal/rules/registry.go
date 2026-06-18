@@ -1,4 +1,4 @@
-package registry
+package rules
 
 import (
 	"context"
@@ -76,7 +76,7 @@ type ManifestRule struct {
 	Version          string   `json:"version"`
 }
 
-func New(baseURL string) Client {
+func NewRegistry(baseURL string) Client {
 	if baseURL == "" {
 		baseURL = "https://api.greprules.io"
 	}

@@ -6,7 +6,7 @@ import (
 	"github.com/greprules/greprules/internal/config"
 )
 
-func TestRecommendationsPreferSystemWhenManagedIsMissing(t *testing.T) {
+func TestRecommendationsUseManagedSetupWhenManagedIsMissing(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.OpenGrep.Mode = "managed"
 	cfg.OpenGrep.Managed = true
@@ -21,11 +21,13 @@ func TestRecommendationsPreferSystemWhenManagedIsMissing(t *testing.T) {
 
 	AddOpenGrepRecommendations(&report, cfg)
 
-	if !containsString(report.RecommendedCommands, "greprules config set opengrep.mode system --global") {
-		t.Fatalf("expected system config recommendation, got %#v", report.RecommendedCommands)
+	if !containsString(report.RecommendedCommands, "greprules setup-opengrep") {
+		t.Fatalf("expected setup recommendation, got %#v", report.RecommendedCommands)
 	}
-	if containsString(report.RecommendedCommands, "greprules setup-opengrep") {
-		t.Fatalf("expected system recommendation to take precedence over setup, got %#v", report.RecommendedCommands)
+	for _, command := range report.RecommendedCommands {
+		if command == "greprules config set opengrep.mode system --global" {
+			t.Fatalf("status should not recommend config set, got %#v", report.RecommendedCommands)
+		}
 	}
 }
 
