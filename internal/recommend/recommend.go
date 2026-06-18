@@ -2,6 +2,7 @@ package recommend
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/greprules/greprules/internal/detect"
 	"github.com/greprules/greprules/internal/registry"
@@ -12,6 +13,7 @@ type Candidate struct {
 	Reason     string   `json:"reason"`
 	Confidence float64  `json:"confidence"`
 	Languages  []string `json:"languages,omitempty"`
+	Frameworks []string `json:"frameworks,omitempty"`
 	Available  bool     `json:"available"`
 }
 
@@ -45,73 +47,92 @@ func BuildAgentContext(result detect.Result, available []registry.PackSummary, c
 }
 
 func ForDetection(result detect.Result, available []registry.PackSummary) []Candidate {
-	availableSet := map[string]registry.PackSummary{}
+	candidates := make([]Candidate, 0, len(available))
 	for _, pack := range available {
-		availableSet[pack.Slug] = pack
-	}
-	candidates := map[string]Candidate{}
-	add := func(packID, reason string, confidence float64, languages ...string) {
-		existing, ok := candidates[packID]
-		if ok && existing.Confidence >= confidence {
-			return
+		if candidate, ok := candidateForPack(result, pack); ok {
+			candidates = append(candidates, candidate)
 		}
-		_, isAvailable := availableSet[packID]
-		candidates[packID] = Candidate{
-			PackID:     packID,
-			Reason:     reason,
+	}
+	sortCandidates(candidates)
+	return candidates
+}
+
+func candidateForPack(result detect.Result, pack registry.PackSummary) (Candidate, bool) {
+	selection := pack.Selection
+	if selection.Kind == "source" || selection.Kind == "manual" {
+		return Candidate{}, false
+	}
+	languages := normalizeList(selection.Languages)
+	frameworks := normalizeList(selection.Frameworks)
+	if selection.Kind == "" && len(languages) == 0 && len(frameworks) == 0 {
+		languages = normalizeList(pack.Languages)
+	}
+	kind := selection.Kind
+	if kind == "" {
+		if len(frameworks) > 0 {
+			kind = "framework"
+		} else if len(languages) > 0 {
+			kind = "language"
+		}
+	}
+	language, languageOK := bestLanguage(result.Languages, languages)
+	framework, frameworkOK := bestFramework(result.Frameworks, frameworks)
+	switch kind {
+	case "language":
+		if !languageOK {
+			return Candidate{}, false
+		}
+		return Candidate{
+			PackID:     pack.Slug,
+			Reason:     "detected " + language.Name,
+			Confidence: language.Confidence,
+			Languages:  languages,
+			Frameworks: frameworks,
+			Available:  true,
+		}, true
+	case "framework":
+		if !frameworkOK {
+			return Candidate{}, false
+		}
+		confidence := framework.Confidence
+		if languageOK && language.Confidence > 0 {
+			confidence = minFloat(1, confidence+0.15)
+		}
+		return Candidate{
+			PackID:     pack.Slug,
+			Reason:     "detected " + framework.Name,
 			Confidence: confidence,
 			Languages:  languages,
-			Available:  isAvailable || len(availableSet) == 0,
+			Frameworks: frameworks,
+			Available:  true,
+		}, true
+	case "runtime":
+		if frameworkOK {
+			confidence := framework.Confidence
+			if languageOK && language.Confidence > 0 {
+				confidence = minFloat(1, confidence+0.1)
+			}
+			return Candidate{
+				PackID:     pack.Slug,
+				Reason:     "detected " + framework.Name,
+				Confidence: confidence,
+				Languages:  languages,
+				Frameworks: frameworks,
+				Available:  true,
+			}, true
+		}
+		if languageOK {
+			return Candidate{
+				PackID:     pack.Slug,
+				Reason:     "detected " + language.Name + " runtime ecosystem",
+				Confidence: language.Confidence * 0.9,
+				Languages:  languages,
+				Frameworks: frameworks,
+				Available:  true,
+			}, true
 		}
 	}
-	for _, language := range result.Languages {
-		switch language.Name {
-		case "typescript", "javascript":
-			add("javascript-typescript-security", "detected "+language.Name, language.Confidence, language.Name)
-			add("nodejs-security", "detected JavaScript runtime ecosystem", language.Confidence*0.9, language.Name)
-		case "python":
-			add("python-security", "detected python", language.Confidence, "python")
-		case "go":
-			add("go-security", "detected go", language.Confidence, "go")
-		case "java", "jvm":
-			add("jvm-security", "detected JVM project", language.Confidence, language.Name)
-		case "php":
-			add("php-security", "detected php", language.Confidence, "php")
-		case "ruby":
-			add("ruby-security", "detected ruby", language.Confidence, "ruby")
-		case "rust", "c", "cpp":
-			add("c-cpp-rust-security", "detected native language project", language.Confidence, language.Name)
-		case "csharp", "dotnet":
-			add("dotnet-security", "detected .NET project", language.Confidence, language.Name)
-		case "config":
-			add("config-security", "detected configuration manifests", language.Confidence, "config")
-		}
-	}
-	for _, framework := range result.Frameworks {
-		switch framework.Name {
-		case "nextjs", "react", "express", "nestjs":
-			add("nodejs-security", "detected "+framework.Name, framework.Confidence, "javascript", "typescript")
-		case "django", "flask", "fastapi":
-			add("python-web-security", "detected "+framework.Name, framework.Confidence, "python")
-		case "spring":
-			add("java-spring-security", "detected spring", framework.Confidence, "java")
-		case "laravel":
-			add("php-laravel-security", "detected laravel", framework.Confidence, "php")
-		}
-	}
-	out := make([]Candidate, 0, len(candidates))
-	for _, candidate := range candidates {
-		if candidate.Available {
-			out = append(out, candidate)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Confidence == out[j].Confidence {
-			return out[i].PackID < out[j].PackID
-		}
-		return out[i].Confidence > out[j].Confidence
-	})
-	return out
+	return Candidate{}, false
 }
 
 func PackIDs(candidates []Candidate) []string {
@@ -125,4 +146,91 @@ func PackIDs(candidates []Candidate) []string {
 		ids = append(ids, candidate.PackID)
 	}
 	return ids
+}
+
+func bestLanguage(signals []detect.Signal, packLanguages []string) (detect.Signal, bool) {
+	var best detect.Signal
+	for _, signal := range signals {
+		for _, language := range packLanguages {
+			if languageMatches(signal.Name, language) && signal.Confidence >= best.Confidence {
+				best = signal
+			}
+		}
+	}
+	return best, best.Name != ""
+}
+
+func bestFramework(signals []detect.Signal, packFrameworks []string) (detect.Signal, bool) {
+	var best detect.Signal
+	for _, signal := range signals {
+		for _, framework := range packFrameworks {
+			if normalizeToken(signal.Name) == normalizeToken(framework) && signal.Confidence >= best.Confidence {
+				best = signal
+			}
+		}
+	}
+	return best, best.Name != ""
+}
+
+func languageMatches(detected string, packLanguage string) bool {
+	detected = normalizeToken(detected)
+	packLanguage = normalizeToken(packLanguage)
+	if detected == "" || packLanguage == "" {
+		return false
+	}
+	if detected == packLanguage {
+		return true
+	}
+	switch detected {
+	case "jvm":
+		return packLanguage == "java" || packLanguage == "kotlin" || packLanguage == "scala"
+	case "java", "kotlin", "scala":
+		return packLanguage == "jvm"
+	case "dotnet":
+		return packLanguage == "csharp"
+	case "csharp":
+		return packLanguage == "dotnet"
+	case "config":
+		return packLanguage == "generic" || packLanguage == "yaml" || packLanguage == "json" || packLanguage == "bash" || packLanguage == "sh" || packLanguage == "dockerfile" || packLanguage == "terraform" || packLanguage == "properties"
+	case "bash":
+		return packLanguage == "sh"
+	case "dockerfile", "terraform", "yaml", "json":
+		return packLanguage == "config" || packLanguage == "generic"
+	}
+	return false
+}
+
+func normalizeList(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		normalized := normalizeToken(value)
+		if normalized == "" || seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		out = append(out, normalized)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func normalizeToken(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func sortCandidates(candidates []Candidate) {
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Confidence == candidates[j].Confidence {
+			return candidates[i].PackID < candidates[j].PackID
+		}
+		return candidates[i].Confidence > candidates[j].Confidence
+	})
+}
+
+func minFloat(left, right float64) float64 {
+	if left < right {
+		return left
+	}
+	return right
 }

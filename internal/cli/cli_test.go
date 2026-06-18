@@ -58,7 +58,7 @@ func TestRunRecommendAgentContextUsesTargetSignals(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/packs" {
 			w.Header().Set("content-type", "application/json")
-			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"python-web-security","name":"Python Web Security","languages":["python"]}]}`))
+			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"python-web-security","name":"Python Web Security","languages":["python"],"selection":{"kind":"framework","languages":["python"],"frameworks":["fastapi"],"source_types":[],"tags":[]}}]}`))
 			return
 		}
 		http.NotFound(w, r)
@@ -95,7 +95,7 @@ func TestRunFetchUsesTargetAwareRecommendation(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/packs":
 			w.Header().Set("content-type", "application/json")
-			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"python-web-security","name":"Python Web Security","languages":["python"]}]}`))
+			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"python-web-security","name":"Python Web Security","languages":["python"],"selection":{"kind":"framework","languages":["python"],"frameworks":["fastapi"],"source_types":[],"tags":[]}}]}`))
 		case "/api/packs/python-web-security/manifest.json":
 			w.Header().Set("content-type", "application/json")
 			_, _ = w.Write([]byte(`{"schema_version":1,"slug":"python-web-security","build_id":"build-1","total_rules":1,"languages":["python"],"rules":[{"slug":"example","yaml_path":"rules/example.yaml"}]}`))
@@ -132,7 +132,7 @@ func TestRunScanAutoFetchesMissingLockForStandalone(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/packs":
 			w.Header().Set("content-type", "application/json")
-			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"python-web-security","name":"Python Web Security","languages":["python"]}]}`))
+			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"python-web-security","name":"Python Web Security","languages":["python"],"selection":{"kind":"framework","languages":["python"],"frameworks":["fastapi"],"source_types":[],"tags":[]}}]}`))
 		case "/api/packs/python-web-security/manifest.json":
 			w.Header().Set("content-type", "application/json")
 			_, _ = w.Write([]byte(`{"schema_version":1,"slug":"python-web-security","build_id":"build-1","total_rules":1,"languages":["python"],"rules":[{"slug":"example","yaml_path":"rules/example.yaml"}]}`))

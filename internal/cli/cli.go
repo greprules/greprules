@@ -326,7 +326,6 @@ func runRecommend(ctx context.Context, args []string) error {
 	format := fs.String("format", "text", "output format: text or json")
 	rootFlag := fs.String("root", ".", "repo root or child path")
 	registryURL := fs.String("registry", "", "registry URL override")
-	noNetwork := fs.Bool("no-network", false, "skip registry availability lookup")
 	agent := fs.Bool("agent", false, "print agent-assisted selection context")
 	changed := fs.Bool("changed", false, "recommend for git changed, staged, and untracked files")
 	targetsFrom := fs.String("targets-from", "", "newline-delimited file of scan targets relative to root")
@@ -352,9 +351,9 @@ func runRecommend(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	var packs []registry.PackSummary
-	if !*noNetwork {
-		packs, _ = registry.New(*registryURL).ListPacks(ctx)
+	packs, err := registry.New(*registryURL).ListPacks(ctx)
+	if err != nil {
+		return fmt.Errorf("list registry packs: %w", err)
 	}
 	candidates := recommend.ForDetection(result, packs)
 	if *format == "json" {
@@ -487,7 +486,10 @@ func selectPackIDsForTargets(ctx context.Context, root string, cfg config.Config
 	if err != nil {
 		return packSelection{}, err
 	}
-	available, _ := client.ListPacks(ctx)
+	available, err := client.ListPacks(ctx)
+	if err != nil {
+		return packSelection{}, fmt.Errorf("list registry packs: %w", err)
+	}
 	candidates := recommend.ForDetection(result, available)
 	return packSelection{
 		Detection:  result,

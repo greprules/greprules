@@ -18,20 +18,28 @@ type Client struct {
 }
 
 type PackSummary struct {
-	Slug             string         `json:"slug"`
-	Name             string         `json:"name"`
-	Summary          string         `json:"summary"`
-	SourceType       string         `json:"source_type"`
-	Criteria         map[string]any `json:"criteria"`
-	TotalRules       int            `json:"total_rules"`
-	DownloadCount    int            `json:"download_count"`
-	LastCommit       string         `json:"last_commit"`
-	Languages        []string       `json:"languages"`
-	ValidationStatus string         `json:"validation_status"`
-	ManifestURL      string         `json:"manifest_url"`
-	DownloadURL      string         `json:"download_url"`
-	CreatedAt        string         `json:"created_at"`
-	UpdatedAt        string         `json:"updated_at"`
+	Slug             string        `json:"slug"`
+	Name             string        `json:"name"`
+	Summary          string        `json:"summary"`
+	SourceType       string        `json:"source_type"`
+	TotalRules       int           `json:"total_rules"`
+	DownloadCount    int           `json:"download_count"`
+	LastCommit       string        `json:"last_commit"`
+	Languages        []string      `json:"languages"`
+	Selection        PackSelection `json:"selection"`
+	ValidationStatus string        `json:"validation_status"`
+	ManifestURL      string        `json:"manifest_url"`
+	DownloadURL      string        `json:"download_url"`
+	CreatedAt        string        `json:"created_at"`
+	UpdatedAt        string        `json:"updated_at"`
+}
+
+type PackSelection struct {
+	Kind        string   `json:"kind"`
+	Languages   []string `json:"languages"`
+	Frameworks  []string `json:"frameworks"`
+	SourceTypes []string `json:"source_types"`
+	Tags        []string `json:"tags"`
 }
 
 type PackManifest struct {
@@ -44,7 +52,6 @@ type PackManifest struct {
 	BuildID       string         `json:"build_id"`
 	TotalRules    int            `json:"total_rules"`
 	Languages     []string       `json:"languages"`
-	Criteria      map[string]any `json:"criteria"`
 	Rules         []ManifestRule `json:"rules"`
 }
 

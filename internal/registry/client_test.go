@@ -19,7 +19,7 @@ func TestClientFetchesPacksManifestAndTarball(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/packs":
 			w.Header().Set("content-type", "application/json")
-			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"go-security","name":"Go","summary":"","source_type":"community","total_rules":1,"download_count":0,"last_commit":"","languages":["go"],"validation_status":"verified","manifest_url":"/api/packs/go-security/manifest.json","download_url":"/api/packs/go-security/latest.tar.gz","created_at":"","updated_at":""}]}`))
+			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"go-security","name":"Go","summary":"","source_type":"community","total_rules":1,"download_count":0,"last_commit":"","languages":["go"],"selection":{"kind":"language","languages":["go"],"frameworks":[],"source_types":[],"tags":[]},"validation_status":"verified","manifest_url":"/api/packs/go-security/manifest.json","download_url":"/api/packs/go-security/latest.tar.gz","created_at":"","updated_at":""}]}`))
 		case "/api/packs/go-security/manifest.json":
 			w.Header().Set("content-type", "application/json")
 			_, _ = w.Write([]byte(`{"schema_version":1,"slug":"go-security","build_id":"build-1","total_rules":1,"languages":["go"],"rules":[]}`))
@@ -39,6 +39,9 @@ func TestClientFetchesPacksManifestAndTarball(t *testing.T) {
 	}
 	if len(packs) != 1 || packs[0].Slug != "go-security" {
 		t.Fatalf("unexpected packs: %#v", packs)
+	}
+	if packs[0].Selection.Kind != "language" || len(packs[0].Selection.Languages) != 1 || packs[0].Selection.Languages[0] != "go" {
+		t.Fatalf("unexpected pack selection: %#v", packs[0].Selection)
 	}
 	_, manifest, err := client.FetchManifest(context.Background(), "go-security")
 	if err != nil {
