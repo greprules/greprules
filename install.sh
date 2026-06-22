@@ -9,6 +9,12 @@ log() {
   printf '%s\n' "$*" >&2
 }
 
+step() {
+  number="$1"
+  shift
+  log "[$number] $*"
+}
+
 fail() {
   log "error: $*"
   exit 1
@@ -150,8 +156,20 @@ default_install_dir() {
   printf '%s' "$HOME/.local/bin"
 }
 
+run_setup_opengrep() {
+  opengrep_setup_log="${tmp_dir}/opengrep-setup.log"
+  if "$target" setup-opengrep >"$opengrep_setup_log" 2>&1; then
+    cat "$opengrep_setup_log" >&2
+  else
+    cat "$opengrep_setup_log" >&2
+    fail "failed to prepare managed OpenGrep"
+  fi
+}
+
 os="$(platform_os)" || fail "unsupported OS: $(uname -s). curl install currently supports macOS and Linux"
 arch="$(platform_arch)" || fail "unsupported architecture: $(uname -m). supported architectures are amd64 and arm64"
+
+step "1/5" "Resolving greprules release for ${os}/${arch}"
 version="$(resolve_version)"
 archive_version="${version#v}"
 archive="greprules_${archive_version}_${os}_${arch}.tar.gz"
@@ -164,17 +182,18 @@ extract_dir="${tmp_dir}/extract"
 install_dir="$(default_install_dir)"
 target="${install_dir}/greprules"
 
-log "Installing greprules ${version} for ${os}/${arch}"
-log "Downloading ${archive_url}"
+step "2/5" "Downloading greprules ${version}"
 
 download_file "$checksums_url" "$checksums_path" || fail "failed to download checksums.txt"
 download_file "$archive_url" "$archive_path" || fail "failed to download ${archive}"
 
+step "3/5" "Verifying archive checksum"
 expected="$(awk -v file="$archive" '$2 == file {print $1}' "$checksums_path" | head -n 1)"
 [ -n "$expected" ] || fail "checksum entry not found for ${archive}"
 actual="$(sha256_file "$archive_path")" || fail "no SHA256 tool found; install sha256sum, shasum, openssl, or python3"
 [ "$actual" = "$expected" ] || fail "checksum mismatch for ${archive}"
 
+step "4/5" "Installing greprules into ${install_dir}"
 mkdir -p "$extract_dir"
 tar -xzf "$archive_path" -C "$extract_dir" || fail "failed to extract ${archive}"
 [ -f "${extract_dir}/greprules" ] || fail "archive did not contain greprules binary"
@@ -193,6 +212,9 @@ else
   log "Installed greprules to ${target}"
 fi
 
+step "5/5" "Preparing managed OpenGrep; this may take a minute"
+run_setup_opengrep
+
 case ":${PATH:-}:" in
   *:"$install_dir":*) ;;
   *)
@@ -201,3 +223,11 @@ case ":${PATH:-}:" in
     log "  export PATH=\"${install_dir}:\$PATH\""
     ;;
 esac
+
+log ""
+if [ -x "$target" ]; then
+  case ":${PATH:-}:" in
+    *:"$install_dir":*) log "Done. Run: greprules scan ." ;;
+    *) log "Done. Run: ${target} scan ." ;;
+  esac
+fi

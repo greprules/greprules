@@ -92,7 +92,7 @@ OpenGrep does the actual scanning. greprules keeps runtime selection explicit so
 | `system` | You already have `opengrep` on `PATH` and want to use it. |
 | `path` | You want to point greprules at a specific OpenGrep executable. |
 
-For standalone CLI usage, the default managed runtime is installed automatically by `greprules scan` or explicitly with `greprules setup-opengrep`. Agent plugins expose runtime configuration through their `/greprules configure` or `$greprules-configure` workflows.
+For standalone CLI usage, the installer prepares the default managed runtime, and `greprules scan` can also install it automatically if it is missing. Agent plugins expose runtime configuration through their `/greprules configure` or `$greprules-configure` workflows.
 
 For agent/plugin automation only, the underlying settings command is:
 
@@ -161,7 +161,7 @@ Install or update the standalone CLI:
 curl -fsSL https://greprules.io/install.sh | sh
 ```
 
-The installer downloads the latest GitHub Release for your platform, verifies it with `checksums.txt`, and installs `greprules` into `$HOME/.local/bin` by default.
+The installer downloads the latest GitHub Release for your platform, verifies it with `checksums.txt`, installs `greprules` into `$HOME/.local/bin` by default, and prepares the managed OpenGrep runtime used by scans.
 If the greprules.io shortcut is unavailable, use `https://raw.githubusercontent.com/greprules/greprules/main/install.sh` directly.
 
 To pin a version or install somewhere else:
@@ -170,6 +170,8 @@ To pin a version or install somewhere else:
 curl -fsSL https://greprules.io/install.sh | GREPRULES_VERSION=v0.3.0 sh
 curl -fsSL https://greprules.io/install.sh | GREPRULES_INSTALL_DIR=/usr/local/bin sh
 ```
+
+OpenGrep is kept in greprules' managed cache, so installing greprules does not overwrite, replace, or expose a system `opengrep` command. If you want to use OpenGrep directly as its own CLI, install OpenGrep separately.
 
 ```bash
 greprules scan .
@@ -182,7 +184,7 @@ More commands:
 ```bash
 greprules scan --changed
 greprules fetch python-security
-greprules setup-opengrep
+greprules setup-opengrep --force
 greprules scan path/to/file
 greprules scan . --json
 greprules scan . --sarif --output result.sarif
