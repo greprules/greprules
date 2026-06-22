@@ -13,11 +13,10 @@ greprules is maintained in the greprules GitHub organization with support from P
 
 ## Quick Start
 
-### Standalone CLI
+### Install CLI
 
 ```bash
 curl -fsSL https://greprules.io/install.sh | sh
-greprules scan .
 ```
 
 ### Claude Code
