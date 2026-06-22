@@ -13,6 +13,7 @@ Core rules:
 - greprules always uses its managed OpenGrep runtime. Do not configure `opengrep.mode` or `opengrep.path`.
 - OpenGrep default rules and Stop hook scans are opt-in only.
 - Treat a missing lockfile as rule-pack fetch state, not OpenGrep setup failure.
+- Treat a missing Claude Code settings file as normal default-state, not a warning or setup problem.
 
 Settings JSON:
 
@@ -28,7 +29,7 @@ Settings JSON:
 Workflow:
 
 1. Run `greprules agent-status --format json`, then read Claude Code settings or use defaults.
-2. For status-only requests, summarize `status`, registry, active OpenGrep runtime, rule-pack state, and Claude Code settings. If `lock.exists=false`, say only that packs have not been fetched yet.
+2. For status-only requests, summarize readiness first, then effective Claude Code settings. Use `source: defaults` when the settings file is absent. Do not call an absent settings file a warning or setup problem. If `lock.exists=false`, say packs have not been fetched for this workspace yet and will be fetched automatically when scanning if the registry is reachable.
 3. For registry or `opengrep.includeDefaultRules`, use `greprules agent-config set <key> <value> --global` unless the user asked for repo-local config.
 4. For hook settings, update only the Claude Code settings JSON, then rerun agent-status.
 5. If OpenGrep is not ready, run `greprules setup-opengrep`.
