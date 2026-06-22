@@ -151,12 +151,10 @@ exit 0
 	}
 	cfg := config.DefaultConfig()
 	cfg.Registry = server.URL
-	cfg.OpenGrep.Mode = "path"
-	cfg.OpenGrep.Managed = false
-	cfg.OpenGrep.Path = fakeOpenGrep
 	if err := config.SaveLocalConfig(root, cfg); err != nil {
 		t.Fatal(err)
 	}
+	configureTestManagedOpenGrep(t, fakeOpenGrep)
 
 	var stdout bytes.Buffer
 	withStdout(t, &stdout, func() {

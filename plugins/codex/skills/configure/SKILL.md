@@ -1,17 +1,17 @@
 ---
 name: greprules-configure
-description: Inspect and configure greprules registry, OpenGrep runtime, and Codex hook behavior.
+description: Inspect and configure greprules registry, managed OpenGrep readiness, and Codex hook behavior.
 ---
 
-Configure or inspect greprules for Codex, including registry, OpenGrep runtime, and hook settings.
+Configure or inspect greprules for Codex, including registry, managed OpenGrep readiness, and hook settings.
 
 Core rules:
 
 - Use the plugin-bundled `bin/greprules` wrapper; shell `PATH` is optional.
 - Run `greprules agent-status --format json` before decisions and after changes.
-- Agent config owns registry/OpenGrep runtime. Codex settings own hook behavior. Never store hooks in `greprules agent-config set agent.*`.
+- Agent config owns shared registry and rule-scan options. Codex settings own hook behavior. Never store hooks in `greprules agent-config set agent.*`.
 - Codex settings path: `${CODEX_HOME:-$HOME/.codex}/plugins/greprules/settings.json`.
-- Do not write machine-specific `opengrep.path` to shared `.greprules/config.yaml`.
+- greprules always uses its managed OpenGrep runtime. Do not configure `opengrep.mode` or `opengrep.path`.
 - OpenGrep default rules and Stop hook scans are opt-in only.
 - Treat a missing lockfile as rule-pack fetch state, not OpenGrep setup failure.
 
@@ -34,6 +34,5 @@ Workflow:
 4. If registry access fails, report URL and error; change registry only on request.
 5. For registry or `opengrep.includeDefaultRules`, use `greprules agent-config set <key> <value> --global` unless the user asked for repo-local config.
 6. For hook settings, update only the Codex settings JSON, then rerun agent-status.
-7. For runtime changes, choose `system` when `opengrep.system.ok`, `managed` when system OpenGrep is unavailable or plugin-managed setup is preferred, and `path` only with a provided path.
-8. Apply runtime with `greprules agent-config set ... --global`; for managed mode, also run `greprules setup-opengrep`.
-9. Rerun agent-status and summarize registry, OpenGrep, rule-pack state, and Codex settings.
+7. If OpenGrep is not ready, run `greprules setup-opengrep`.
+8. Rerun agent-status and summarize registry, OpenGrep, rule-pack state, and Codex settings.

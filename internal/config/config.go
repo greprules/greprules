@@ -494,19 +494,9 @@ func normalizeConfig(cfg *Config) {
 		cfg.Scan.SARIF = true
 		cfg.Scan.AgentJSON = true
 	}
-	if cfg.OpenGrep.Mode == "" {
-		if cfg.OpenGrep.Path != "" {
-			cfg.OpenGrep.Mode = "path"
-		} else if !cfg.OpenGrep.Managed {
-			cfg.OpenGrep.Mode = "system"
-		} else {
-			cfg.OpenGrep.Mode = "managed"
-		}
-	}
-	if cfg.OpenGrep.Mode != "managed" && cfg.OpenGrep.Mode != "system" && cfg.OpenGrep.Mode != "path" {
-		cfg.OpenGrep.Mode = "managed"
-	}
-	cfg.OpenGrep.Managed = cfg.OpenGrep.Mode == "managed"
+	cfg.OpenGrep.Managed = true
+	cfg.OpenGrep.Mode = "managed"
+	cfg.OpenGrep.Path = ""
 	if cfg.OpenGrep.Version == "" {
 		cfg.OpenGrep.Version = "latest"
 	}
@@ -562,21 +552,17 @@ func applyPatch(cfg *Config, patch ConfigPatch, scope string, allowEnginePath bo
 	if patch.Scan.AgentJSON != nil {
 		cfg.Scan.AgentJSON = *patch.Scan.AgentJSON
 	}
-	if patch.OpenGrep.Managed != nil {
-		cfg.OpenGrep.Managed = *patch.OpenGrep.Managed
+	if patch.OpenGrep.Managed != nil && !*patch.OpenGrep.Managed {
+		warnings = append(warnings, scope+" config opengrep.managed ignored; greprules always uses managed OpenGrep")
 	}
-	if patch.OpenGrep.Mode != nil {
-		cfg.OpenGrep.Mode = *patch.OpenGrep.Mode
+	if patch.OpenGrep.Mode != nil && *patch.OpenGrep.Mode != "" && *patch.OpenGrep.Mode != "managed" {
+		warnings = append(warnings, scope+" config opengrep.mode ignored; greprules always uses managed OpenGrep")
 	}
 	if patch.OpenGrep.Version != nil {
 		cfg.OpenGrep.Version = *patch.OpenGrep.Version
 	}
-	if patch.OpenGrep.Path != nil {
-		if allowEnginePath {
-			cfg.OpenGrep.Path = *patch.OpenGrep.Path
-		} else {
-			warnings = append(warnings, scope+" config opengrep.path ignored; put executable paths in global config, local config, env, or CLI flags")
-		}
+	if patch.OpenGrep.Path != nil && *patch.OpenGrep.Path != "" {
+		warnings = append(warnings, scope+" config opengrep.path ignored; greprules always uses managed OpenGrep")
 	}
 	if patch.OpenGrep.IncludeDefaultRules != nil {
 		cfg.OpenGrep.IncludeDefaultRules = *patch.OpenGrep.IncludeDefaultRules
@@ -591,13 +577,10 @@ func applyEnv(cfg *Config) []string {
 		cfg.Registry = value
 	}
 	if value := os.Getenv("GREPRULES_ENGINE"); value != "" {
-		cfg.OpenGrep.Mode = value
+		warnings = append(warnings, "GREPRULES_ENGINE ignored; greprules always uses managed OpenGrep")
 	}
 	if value := os.Getenv("GREPRULES_OPENGREP_PATH"); value != "" {
-		cfg.OpenGrep.Path = expandHome(value)
-		if os.Getenv("GREPRULES_ENGINE") == "" {
-			cfg.OpenGrep.Mode = "path"
-		}
+		warnings = append(warnings, "GREPRULES_OPENGREP_PATH ignored; greprules always uses managed OpenGrep")
 	}
 	if value := os.Getenv("GREPRULES_OPENGREP_VERSION"); value != "" {
 		cfg.OpenGrep.Version = value
@@ -616,9 +599,7 @@ func applyEnv(cfg *Config) []string {
 	if value := os.Getenv("GREPRULES_OUTPUT_DIR"); value != "" {
 		cfg.OutputDir = value
 	}
-	if cfg.OpenGrep.Mode == "path" && cfg.OpenGrep.Path == "" {
-		warnings = append(warnings, "opengrep.mode is path but opengrep.path is empty")
-	}
+	normalizeConfig(cfg)
 	return warnings
 }
 

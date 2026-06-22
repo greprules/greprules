@@ -635,17 +635,6 @@ def _format_status(root: Path) -> str:
     return "\n".join(lines)
 
 
-def _effective_opengrep_mode(report: Dict[str, Any]) -> str:
-    config = report.get("config") or {}
-    effective = config.get("config") if isinstance(config, dict) else {}
-    opengrep = effective.get("opengrep") if isinstance(effective, dict) else {}
-    if isinstance(opengrep, dict):
-        mode = opengrep.get("mode")
-        if isinstance(mode, str):
-            return mode
-    return "managed"
-
-
 def _setup(root: Path) -> str:
     report, error = _status_json(root)
     if report is None:
@@ -657,17 +646,8 @@ def _setup(root: Path) -> str:
         return "greprules setup complete.\n" + _format_status(root)
     if active_ok:
         return "greprules setup checked runtime.\n" + _format_status(root)
-    mode = _effective_opengrep_mode(report)
-    if mode != "managed":
-        return (
-            _format_status(root)
-            + f"\n\nOpenGrep is configured for {mode}. Run /greprules configure to inspect status or choose a different runtime."
-        )
     outputs: List[str] = []
-    for command in (
-        ["agent-config", "set", "opengrep.mode", "managed", "--global"],
-        ["setup-opengrep", "--root", str(root)],
-    ):
+    for command in (["setup-opengrep", "--root", str(root)],):
         code, out, err = _run(command, root, timeout=600)
         if code != 0:
             return "greprules setup failed: " + (err or out or "unknown setup failure").strip()
@@ -683,9 +663,7 @@ def _configure(root: Path, argv: List[str]) -> str:
         return (
             _format_status(root)
             + "\n\nConfigure with one of:\n"
-            + "  /greprules configure system\n"
             + "  /greprules configure managed\n"
-            + "  /greprules configure path /absolute/path/to/opengrep\n"
             + "  /greprules configure registry https://api.greprules.io\n"
             + "  /greprules configure include-default-rules true|false\n"
             + "  /greprules configure auto-scan true|false\n"
@@ -694,20 +672,10 @@ def _configure(root: Path, argv: List[str]) -> str:
             + "  /greprules configure auto-scan-max-changed-files <count>"
         )
     mode = argv[0]
-    if mode == "system":
-        commands = [["agent-config", "set", "opengrep.mode", "system", "--global"]]
-    elif mode == "managed":
-        commands = [
-            ["agent-config", "set", "opengrep.mode", "managed", "--global"],
-            ["setup-opengrep", "--root", str(root)],
-        ]
-    elif mode == "path":
-        if len(argv) < 2:
-            return "usage: /greprules configure path /absolute/path/to/opengrep"
-        commands = [
-            ["agent-config", "set", "opengrep.mode", "path", "--global"],
-            ["agent-config", "set", "opengrep.path", argv[1], "--global"],
-        ]
+    if mode == "managed":
+        commands = [["setup-opengrep", "--root", str(root)]]
+    elif mode in {"system", "path"}:
+        return "greprules always uses its managed OpenGrep runtime. Run /greprules configure managed to prepare it."
     elif mode == "include-default-rules":
         if len(argv) < 2 or argv[1].lower() not in {"true", "false"}:
             return "usage: /greprules configure include-default-rules true|false"
@@ -755,7 +723,7 @@ def _help() -> str:
 
 Subcommands:
   setup                          Set up greprules after installation
-  configure [mode]               Configure OpenGrep runtime: managed, system, path <exe>
+  configure [setting]            Configure registry, default rules, hooks, or managed OpenGrep readiness
   fetch <pack> [pack...]         Fetch explicit rule packs
   scan-edited                    Scan files Hermes edited and tracked this session
   scan-working-tree              Scan git working tree, staged, and untracked files

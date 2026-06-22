@@ -4,7 +4,7 @@ This plugin teaches Claude Code how to use the local `greprules` CLI without emb
 
 The plugin provides a `bin/greprules` wrapper, not the native Go binary itself. Claude Code skills and hooks invoke that wrapper directly, so `greprules` does not need to be installed on the user's shell `PATH`. The wrapper resolves the real CLI from `GREPRULES_CLI_PATH`, system `PATH` excluding itself, or a managed GitHub Release download cached under the OS user cache directory at `greprules/plugins/claude-code/greprules/<version>/`.
 
-The plugin does not use install-time plugin configuration. OpenGrep runtime selection is stored in greprules agent config, so Claude Code, terminals, and CI can share the same behavior when they opt into those advanced settings.
+The plugin does not use install-time plugin configuration. greprules always uses its managed OpenGrep runtime, shared by standalone CLI and plugin scans.
 
 greprules scans fetched greprules.io packs only by default. Enable OpenGrep default auto-selected rules with `greprules agent-config set opengrep.includeDefaultRules true --global` only when you explicitly want that extra ruleset.
 
@@ -17,7 +17,7 @@ It uses structured CLI outputs:
 Skills:
 
 - `/greprules:setup`: set up greprules after installing the plugin
-- `/greprules:configure`: inspect status or choose managed, system, or manual-path OpenGrep through the CLI
+- `/greprules:configure`: inspect status and configure registry, default rules, or Claude Code hook settings
 - `/greprules:scan-edited`: select rule packs from edited-file context, fetch them if needed, scan files Claude Code edited in this session, and summarize findings
 - `/greprules:scan-working-tree`: select rule packs from git changed-file context, fetch them if needed, scan git working tree, staged, and untracked files, and summarize findings
 - `/greprules:scan-target <path>`: select rule packs from explicit target context, fetch them if needed, scan files or directories, and summarize findings

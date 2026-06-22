@@ -155,8 +155,8 @@ func Resolve(options ResolveOptions) (Runtime, error) {
 }
 
 func ResolveFromConfig(lock config.Lock, cfg config.Config, overrides ConfigOverrides) (Runtime, error) {
-	mode := cfg.OpenGrep.Mode
-	path := cfg.OpenGrep.Path
+	mode := "managed"
+	path := ""
 	version := cfg.OpenGrep.Version
 	if overrides.Mode != "" {
 		mode = overrides.Mode

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/greprules/greprules/internal/config"
+	"github.com/greprules/greprules/internal/opengrep"
 )
 
 func setupAgentPluginTestEnv(t *testing.T) (string, string) {
@@ -57,12 +58,10 @@ func configureAgentScanProject(t *testing.T, root string, fakeOpenGrepScript str
 	if err := os.Chmod(fakeOpenGrep, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	configureTestManagedOpenGrep(t, fakeOpenGrep)
 	writeFile(t, filepath.Join(root, ".greprules", "cache", "packs", "go-security", "rules", "example.yaml"), "rules: []\n")
 	cfg := config.DefaultConfig()
 	cfg.Registry = server.URL
-	cfg.OpenGrep.Mode = "path"
-	cfg.OpenGrep.Managed = false
-	cfg.OpenGrep.Path = fakeOpenGrep
 	cfg.OpenGrep.IncludeDefaultRules = false
 	if err := config.SaveLocalConfig(root, cfg); err != nil {
 		t.Fatal(err)
@@ -77,8 +76,44 @@ func configureAgentScanProject(t *testing.T, root string, fakeOpenGrepScript str
 			RulePath:   ".greprules/cache/packs/go-security/rules",
 			TotalRules: 1,
 		}},
+		Engine: testLockedEngine(fakeOpenGrep),
 	}
 	if err := config.SaveLock(root, lock); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testLockedEngine(path string) *config.LockedEngine {
+	return &config.LockedEngine{
+		Name:    "opengrep",
+		Mode:    "managed",
+		Version: "9.8.7",
+		Path:    path,
+		Source:  "test",
+		Managed: true,
+	}
+}
+
+func configureTestManagedOpenGrep(t *testing.T, path string) {
+	t.Helper()
+	t.Setenv("GREPRULES_CACHE_HOME", filepath.Join(t.TempDir(), "cache"))
+	cacheRoot, err := opengrep.DefaultCacheRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	versionDir := filepath.Join(cacheRoot, "9.8.7")
+	if err := os.MkdirAll(versionDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runtimeInfo := opengrep.Runtime{
+		Name:    "opengrep",
+		Mode:    "managed",
+		Version: "9.8.7",
+		Path:    path,
+		Source:  "test",
+		Managed: true,
+	}
+	if err := opengrep.SaveRuntime(filepath.Join(versionDir, "runtime.json"), runtimeInfo); err != nil {
 		t.Fatal(err)
 	}
 }

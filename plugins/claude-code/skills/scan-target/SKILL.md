@@ -11,7 +11,7 @@ Workflow:
 1. Identify the target path or paths from the user's command. If none are provided, ask for the target.
 2. Resolve the greprules command from the installed plugin root and use its bundled `bin/greprules` wrapper. Do not require `greprules` to be installed on shell `PATH`; in this workflow, `greprules ...` means the resolved wrapper command.
 3. Run `greprules agent-status --format json`.
-4. If `opengrep.active.ok` is false, use `/greprules:configure` or ask one concise question about the OpenGrep runtime choice before scanning.
+4. If `opengrep.active.ok` is false, use `/greprules:setup` to prepare the managed OpenGrep runtime before scanning.
 5. If `lock.exists` is false and `registry.ok` is true, run `greprules agent-scan recommend --format json <path>` for each requested path.
 6. Inspect `detection`, requested targets, `availablePacks`, and `candidates`; choose explicit pack slugs that match the target paths. Do not invent pack slugs.
 7. Fetch the selected packs with `greprules fetch <slug> [<slug>...]`. If no available pack fits the target, report that pack selection needs user input instead of running a broad fetch.

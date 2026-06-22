@@ -87,3 +87,44 @@ func TestRulePackCacheRootUsesUserCacheByDefault(t *testing.T) {
 		t.Fatalf("unexpected cache root: want %s got %s", want, cacheRoot)
 	}
 }
+
+func TestLoadEffectiveConfigIgnoresLegacyOpenGrepRuntimeSelection(t *testing.T) {
+	root := t.TempDir()
+	userConfig := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("GREPRULES_USER_CONFIG", userConfig)
+	data := []byte(`{
+  "schemaVersion": "greprules.user.v1",
+  "opengrep": {
+    "managed": false,
+    "mode": "system",
+    "path": "/usr/local/bin/opengrep",
+    "version": "1.23.0"
+  }
+}`)
+	if err := os.WriteFile(userConfig, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resolution, err := LoadEffectiveConfig(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolution.Config.OpenGrep.Mode != "managed" ||
+		!resolution.Config.OpenGrep.Managed ||
+		resolution.Config.OpenGrep.Path != "" ||
+		resolution.Config.OpenGrep.Version != "1.23.0" {
+		t.Fatalf("expected managed OpenGrep with version preserved, got %#v", resolution.Config.OpenGrep)
+	}
+	for _, want := range []string{"opengrep.managed ignored", "opengrep.mode ignored", "opengrep.path ignored"} {
+		found := false
+		for _, warning := range resolution.Warnings {
+			if strings.Contains(warning, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected warning containing %q, got %#v", want, resolution.Warnings)
+		}
+	}
+}

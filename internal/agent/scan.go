@@ -21,8 +21,6 @@ type runScanOptions struct {
 	Root            string
 	Changed         bool
 	SARIF           bool
-	EngineMode      string
-	OpenGrepPath    string
 	OpenGrepVersion string
 	Targets         []string
 	TargetsFrom     string
@@ -48,8 +46,6 @@ func runScan(ctx context.Context, options runScanOptions) error {
 		return fmt.Errorf("locked rule pack artifacts are missing: %s; run greprules agent-scan recommend, then fetch explicit packs with greprules fetch <slug>", strings.Join(missing, ", "))
 	}
 	runtimeInfo, err := opengrep.ResolveFromConfig(lock, cfg, opengrep.ConfigOverrides{
-		Mode:    options.EngineMode,
-		Path:    options.OpenGrepPath,
 		Version: options.OpenGrepVersion,
 	})
 	if err != nil {

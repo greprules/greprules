@@ -51,8 +51,6 @@ type scanRequest struct {
 	RulePacks       rules.Request
 	OutputDir       string
 	SARIF           bool
-	EngineMode      string
-	OpenGrepPath    string
 	OpenGrepVersion string
 }
 
@@ -142,8 +140,6 @@ func parseScanCommand(args []string) (scanCommand, error) {
 	changed := fs.Bool("changed", false, "scan changed files")
 	noSARIF := fs.Bool("no-sarif", false, "skip SARIF output")
 	format := fs.String("format", "text", "output format: text or json")
-	engineMode := fs.String("engine", "", "OpenGrep engine mode override: managed, system, or path")
-	opengrepPath := fs.String("opengrep-path", "", "OpenGrep binary path override")
 	opengrepVersion := fs.String("opengrep-version", "", "managed OpenGrep version override")
 	targetsFrom := fs.String("targets-from", "", "newline-delimited file of scan targets relative to root")
 	outputDir := fs.String("output-dir", "", "scan output directory override")
@@ -169,8 +165,6 @@ func parseScanCommand(args []string) (scanCommand, error) {
 			},
 			OutputDir:       *outputDir,
 			SARIF:           !*noSARIF,
-			EngineMode:      *engineMode,
-			OpenGrepPath:    *opengrepPath,
 			OpenGrepVersion: *opengrepVersion,
 		},
 		Label:     *label,
@@ -214,8 +208,6 @@ func runScanAfterReadiness(ctx context.Context, options directScanOptions) (Scan
 		return ScanOutcome{Status: "skipped", Message: options.Messages.DoctorFailedPrefix + err.Error()}, nil
 	}
 	report, err := doctor.Build(ctx, packs.Root, doctor.Options{
-		EngineMode:      request.EngineMode,
-		OpenGrepPath:    request.OpenGrepPath,
 		OpenGrepVersion: request.OpenGrepVersion,
 	})
 	if err != nil {
@@ -241,8 +233,6 @@ func runScanAfterReadiness(ctx context.Context, options directScanOptions) (Scan
 			}, nil
 		}
 		report, err = doctor.Build(ctx, packs.Root, doctor.Options{
-			EngineMode:      request.EngineMode,
-			OpenGrepPath:    request.OpenGrepPath,
 			OpenGrepVersion: request.OpenGrepVersion,
 		})
 		if err != nil {
@@ -302,8 +292,6 @@ func runStructuredScan(ctx context.Context, request scanRequest, ioOptions scanI
 		Root:            packs.Root,
 		Changed:         packs.Changed,
 		SARIF:           request.SARIF,
-		EngineMode:      request.EngineMode,
-		OpenGrepPath:    request.OpenGrepPath,
 		OpenGrepVersion: request.OpenGrepVersion,
 		Targets:         packs.Targets,
 		TargetsFrom:     packs.TargetsFrom,

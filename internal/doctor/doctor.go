@@ -16,8 +16,6 @@ import (
 
 type Options struct {
 	Debug           bool
-	EngineMode      string
-	OpenGrepPath    string
 	OpenGrepVersion string
 }
 
@@ -50,7 +48,6 @@ type LockStatus struct {
 
 type OpenGrepStatus struct {
 	Managed RuntimeCheck `json:"managed"`
-	System  RuntimeCheck `json:"system"`
 	Active  RuntimeCheck `json:"active"`
 }
 
@@ -114,14 +111,7 @@ func Build(ctx context.Context, root string, options Options) (Report, error) {
 	} else {
 		report.OpenGrep.Managed = RuntimeCheck{OK: true, Runtime: &runtimeInfo}
 	}
-	if runtimeInfo, err := opengrep.Resolve(opengrep.ResolveOptions{Mode: "system"}); err != nil {
-		report.OpenGrep.System = RuntimeCheck{OK: false, Error: err.Error()}
-	} else {
-		report.OpenGrep.System = RuntimeCheck{OK: true, Runtime: &runtimeInfo}
-	}
 	if runtimeInfo, err := opengrep.ResolveFromConfig(config.Lock{}, cfg, opengrep.ConfigOverrides{
-		Mode:    options.EngineMode,
-		Path:    options.OpenGrepPath,
 		Version: options.OpenGrepVersion,
 	}); err != nil {
 		report.OpenGrep.Active = RuntimeCheck{OK: false, Error: err.Error()}
@@ -140,17 +130,7 @@ func AddOpenGrepRecommendations(report *Report, cfg config.Config) {
 	if report.OpenGrep.Active.OK {
 		return
 	}
-
-	switch cfg.OpenGrep.Mode {
-	case "managed":
-		addRecommendedCommand(report, "greprules setup-opengrep")
-	case "system":
-		addRecommendedCommand(report, "greprules setup-opengrep")
-	case "path":
-		addRecommendedCommand(report, "greprules setup-opengrep")
-	default:
-		addRecommendedCommand(report, "greprules agent-status --format json")
-	}
+	addRecommendedCommand(report, "greprules setup-opengrep")
 }
 
 func addRecommendedCommand(report *Report, command string) {
@@ -172,10 +152,7 @@ func PrintText(writer io.Writer, report Report, debug bool) {
 		}
 	}
 	cfg := report.Config.Config
-	fmt.Fprintf(writer, "opengrep config: mode=%s version=%s", cfg.OpenGrep.Mode, cfg.OpenGrep.Version)
-	if cfg.OpenGrep.Path != "" {
-		fmt.Fprintf(writer, " path=%s", cfg.OpenGrep.Path)
-	}
+	fmt.Fprintf(writer, "opengrep: managed version=%s", cfg.OpenGrep.Version)
 	fmt.Fprintln(writer)
 	if report.Registry.OK {
 		fmt.Fprintln(writer, "registry: ok")
@@ -203,7 +180,6 @@ func PrintText(writer io.Writer, report Report, debug bool) {
 		}
 	}
 	printRuntimeText(writer, "opengrep managed", report.OpenGrep.Managed)
-	printRuntimeText(writer, "opengrep system", report.OpenGrep.System)
 	printRuntimeText(writer, "opengrep active", report.OpenGrep.Active)
 	for _, warning := range report.Warnings {
 		fmt.Fprintln(writer, "warning:", warning)

@@ -10,7 +10,7 @@ Available slash commands:
 
 1. `/greprules setup` sets up greprules after installation.
 2. `/greprules configure` checks registry access, rule-pack fetch state, OpenGrep readiness, and effective agent settings.
-3. `/greprules configure managed|system|path <exe>` configures the OpenGrep runtime.
+3. `/greprules configure managed` prepares the greprules managed OpenGrep runtime.
 4. `/greprules configure registry <url>`, `include-default-rules true|false`, `auto-scan true|false`, `track-edited-files true|false`, `auto-scan-min-interval <seconds>`, and `auto-scan-max-changed-files <count>` configure persistent greprules behavior.
 5. `/greprules scan-edited` scans files tracked by the Hermes `post_tool_call` hook for a single dirty session.
 6. `/greprules scan-working-tree` scans git working tree, staged, and untracked files.

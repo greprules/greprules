@@ -166,16 +166,6 @@ run_setup_opengrep() {
   fi
 }
 
-configure_managed_opengrep() {
-  opengrep_config_log="${tmp_dir}/opengrep-config.log"
-  if "$target" agent-config set opengrep.mode managed --global >"$opengrep_config_log" 2>&1; then
-    cat "$opengrep_config_log" >&2
-  else
-    cat "$opengrep_config_log" >&2
-    fail "failed to configure managed OpenGrep"
-  fi
-}
-
 os="$(platform_os)" || fail "unsupported OS: $(uname -s). curl install currently supports macOS and Linux"
 arch="$(platform_arch)" || fail "unsupported architecture: $(uname -m). supported architectures are amd64 and arm64"
 
@@ -224,7 +214,6 @@ fi
 
 step "5/5" "Preparing managed OpenGrep; this may take a minute"
 run_setup_opengrep
-configure_managed_opengrep
 
 case ":${PATH:-}:" in
   *:"$install_dir":*) ;;

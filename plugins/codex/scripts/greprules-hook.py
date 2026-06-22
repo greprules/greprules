@@ -823,16 +823,7 @@ def readiness_context(root: Path) -> int:
 
     setup_guidance = ""
     if not active_ok:
-        setup_guidance = " Run the $greprules-setup or $greprules-configure skill to choose an OpenGrep runtime."
-        system = nested(report, "opengrep", "system") or {}
-        runtime = system.get("runtime") if isinstance(system, dict) else None
-        if isinstance(system, dict) and system.get("ok") and isinstance(runtime, dict):
-            setup_guidance += " System OpenGrep was detected at " + fallback_string(runtime.get("path"), "opengrep")
-            if runtime.get("version"):
-                setup_guidance += " (version " + str(runtime.get("version")) + ")"
-            setup_guidance += "."
-        else:
-            setup_guidance += " No system opengrep was found on PATH."
+        setup_guidance = " Run the $greprules-setup skill to prepare the managed OpenGrep runtime."
 
     recommended_commands = report.get("recommendedCommands")
     recommended = ", ".join(str(item) for item in recommended_commands) if isinstance(recommended_commands, list) and recommended_commands else "$greprules-configure"
@@ -845,11 +836,10 @@ def readiness_context(root: Path) -> int:
         else:
             rule_pack_guidance = " Rule packs are not fetched yet, and registry access is needed before the first scan can fetch them."
 
-    mode = fallback_string(nested(report, "config", "config", "opengrep", "mode"), "unknown")
     message = (
         f"greprules needs attention before scans. Registry ready: {str(registry_ok).lower()}; "
         f"rule packs fetched: {str(lock_exists).lower()}; OpenGrep ready: {str(active_ok).lower()}; "
-        f"configured OpenGrep mode: {mode}. Recommended commands: {recommended}.{setup_guidance}{rule_pack_guidance}{hook_warning}"
+        f"runtime: managed OpenGrep. Recommended commands: {recommended}.{setup_guidance}{rule_pack_guidance}{hook_warning}"
     )
     emit_system_message(message, {"hook_event_name": "SessionStart"})
     return 0

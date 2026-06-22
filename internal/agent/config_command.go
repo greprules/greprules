@@ -111,9 +111,6 @@ func RunConfigSet(args []string) error {
 		format = "json"
 		schemaVersion = config.LocalConfigSchemaVersion
 	case "repo":
-		if key == "opengrep.path" {
-			return errors.New("opengrep.path cannot be written to shared repo config; use --global or --local")
-		}
 		path = config.ConfigPath(root)
 		format = "yaml"
 		schemaVersion = config.ConfigSchemaVersion
@@ -230,7 +227,7 @@ func parseConfigValue(key string, raw string) (any, error) {
 			return []string{}, nil
 		}
 		return []string{value}, nil
-	case "scan.changedDefault", "scan.sarif", "scan.agentJson", "opengrep.managed", "opengrep.includeDefaultRules":
+	case "scan.changedDefault", "scan.sarif", "scan.agentJson", "opengrep.includeDefaultRules":
 		return strconv.ParseBool(raw)
 	}
 	return raw, nil
@@ -266,10 +263,7 @@ func validConfigKey(key string) bool {
 		"scan.changedDefault",
 		"scan.sarif",
 		"scan.agentJson",
-		"opengrep.managed",
 		"opengrep.includeDefaultRules",
-		"opengrep.mode",
-		"opengrep.path",
 		"opengrep.version":
 		return true
 	default:

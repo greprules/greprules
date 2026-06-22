@@ -31,8 +31,6 @@ The bundled wrapper can download the configured greprules release into a user ca
 /greprules configure registry https://api.greprules.io
 /greprules configure
 /greprules configure managed
-/greprules configure system
-/greprules configure path /absolute/path/to/opengrep
 /greprules configure include-default-rules true
 /greprules configure auto-scan true
 /greprules configure track-edited-files false

@@ -110,18 +110,16 @@ printf '%s\n' "$@" > "`+argsLog+`"
 	}
 	cfg := config.DefaultConfig()
 	cfg.Registry = server.URL
-	cfg.OpenGrep.Mode = "path"
-	cfg.OpenGrep.Managed = false
-	cfg.OpenGrep.Path = fakeOpenGrep
 	if err := config.SaveLocalConfig(root, cfg); err != nil {
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	if err := standalone.RunScanWithOptions(t.Context(), []string{"--root", root, "--verbose", "src/main.py", "--json", "--severity", "ERROR"}, standalone.ScanOptions{
-		Stdout:      &stdout,
-		Stderr:      &stderr,
-		AutoPrepare: true,
+		Stdout:       &stdout,
+		Stderr:       &stderr,
+		AutoPrepare:  true,
+		OpenGrepPath: fakeOpenGrep,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -190,9 +188,6 @@ exit 0
 	}
 	cfg := config.DefaultConfig()
 	cfg.Registry = server.URL
-	cfg.OpenGrep.Mode = "path"
-	cfg.OpenGrep.Managed = false
-	cfg.OpenGrep.Path = fakeOpenGrep
 	if err := config.SaveLocalConfig(root, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -213,8 +208,9 @@ exit 0
 
 	var stderr bytes.Buffer
 	if err := standalone.RunScanWithOptions(t.Context(), []string{"--root", root, "src/main.py"}, standalone.ScanOptions{
-		Stderr:      &stderr,
-		AutoPrepare: true,
+		Stderr:       &stderr,
+		AutoPrepare:  true,
+		OpenGrepPath: fakeOpenGrep,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -274,9 +270,6 @@ printf '{"results":[]}\n'
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
-	cfg.OpenGrep.Mode = "path"
-	cfg.OpenGrep.Managed = false
-	cfg.OpenGrep.Path = fakeOpenGrep
 	if err := config.SaveLocalConfig(root, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -358,9 +351,6 @@ printf '%s\n' "$@" > "`+argsLog+`"
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
-	cfg.OpenGrep.Mode = "path"
-	cfg.OpenGrep.Managed = false
-	cfg.OpenGrep.Path = fakeOpenGrep
 	cfg.OpenGrep.IncludeDefaultRules = true
 	if err := config.SaveLocalConfig(root, cfg); err != nil {
 		t.Fatal(err)
@@ -375,6 +365,7 @@ printf '%s\n' "$@" > "`+argsLog+`"
 			RulePath:   ".greprules/cache/packs/go-security/rules",
 			TotalRules: 1,
 		}},
+		Engine: testLockedEngine(fakeOpenGrep),
 	}
 	if err := config.SaveLock(root, lock); err != nil {
 		t.Fatal(err)
@@ -396,8 +387,8 @@ printf '%s\n' "$@" > "`+argsLog+`"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updatedLock.Engine == nil || updatedLock.Engine.Mode != "path" || updatedLock.Engine.Version != "9.8.7" {
-		t.Fatalf("expected path engine in lockfile, got %#v", updatedLock.Engine)
+	if updatedLock.Engine == nil || updatedLock.Engine.Mode != "managed" || updatedLock.Engine.Version != "9.8.7" {
+		t.Fatalf("expected managed engine in lockfile, got %#v", updatedLock.Engine)
 	}
 }
 
@@ -435,9 +426,6 @@ printf '%s\n' "$configs" >> "`+configLog+`"
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
-	cfg.OpenGrep.Mode = "path"
-	cfg.OpenGrep.Managed = false
-	cfg.OpenGrep.Path = fakeOpenGrep
 	cfg.OpenGrep.IncludeDefaultRules = true
 	if err := config.SaveLocalConfig(root, cfg); err != nil {
 		t.Fatal(err)
@@ -452,6 +440,7 @@ printf '%s\n' "$configs" >> "`+configLog+`"
 			RulePath:   ".greprules/cache/packs/go-security/rules",
 			TotalRules: 1,
 		}},
+		Engine: testLockedEngine(fakeOpenGrep),
 	}
 	if err := config.SaveLock(root, lock); err != nil {
 		t.Fatal(err)
@@ -566,9 +555,6 @@ printf '%s\n' "$configs" > "`+configLog+`"
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
-	cfg.OpenGrep.Mode = "path"
-	cfg.OpenGrep.Managed = false
-	cfg.OpenGrep.Path = fakeOpenGrep
 	cfg.OpenGrep.IncludeDefaultRules = true
 	if err := config.SaveLocalConfig(root, cfg); err != nil {
 		t.Fatal(err)
@@ -592,6 +578,7 @@ printf '%s\n' "$configs" > "`+configLog+`"
 				TotalRules: 1,
 			},
 		},
+		Engine: testLockedEngine(fakeOpenGrep),
 	}
 	if err := config.SaveLock(root, lock); err != nil {
 		t.Fatal(err)
@@ -646,9 +633,6 @@ exit 2
 		t.Fatal(err)
 	}
 	cfg := config.DefaultConfig()
-	cfg.OpenGrep.Mode = "path"
-	cfg.OpenGrep.Managed = false
-	cfg.OpenGrep.Path = fakeOpenGrep
 	if err := config.SaveLocalConfig(root, cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -662,10 +646,12 @@ exit 2
 			RulePath:   ".greprules/cache/packs/go-security/rules",
 			TotalRules: 1,
 		}},
+		Engine: testLockedEngine(fakeOpenGrep),
 	}
 	if err := config.SaveLock(root, lock); err != nil {
 		t.Fatal(err)
 	}
+	configureTestManagedOpenGrep(t, fakeOpenGrep)
 
 	var stdout bytes.Buffer
 	withStdout(t, &stdout, func() {
@@ -707,8 +693,8 @@ func TestAgentConfigSetGlobalAndInspect(t *testing.T) {
 	t.Setenv("GREPRULES_USER_CONFIG", userConfig)
 	writeFile(t, filepath.Join(root, "go.mod"), "module example.test\n")
 
-	if err := agent.RunConfigSet([]string{"--root", root, "--global", "opengrep.mode", "system"}); err != nil {
-		t.Fatal(err)
+	if err := agent.RunConfigSet([]string{"--root", root, "--global", "opengrep.mode", "system"}); err == nil {
+		t.Fatal("expected opengrep.mode to be unsupported")
 	}
 	if err := agent.RunConfigSet([]string{"--root", root, "registry", "http://127.0.0.1:8790", "--global"}); err != nil {
 		t.Fatal(err)
@@ -720,7 +706,7 @@ func TestAgentConfigSetGlobalAndInspect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolution.Config.OpenGrep.Mode != "system" ||
+	if resolution.Config.OpenGrep.Mode != "managed" ||
 		resolution.Config.Registry != "http://127.0.0.1:8790" ||
 		!resolution.Config.OpenGrep.IncludeDefaultRules {
 		t.Fatalf("unexpected effective config: %#v", resolution.Config)
@@ -769,12 +755,10 @@ printf '{"results":[]}\n'
 	}
 	cfg := config.DefaultConfig()
 	cfg.Registry = server.URL
-	cfg.OpenGrep.Mode = "path"
-	cfg.OpenGrep.Managed = false
-	cfg.OpenGrep.Path = fakeOpenGrep
 	if err := config.SaveLocalConfig(root, cfg); err != nil {
 		t.Fatal(err)
 	}
+	configureTestManagedOpenGrep(t, fakeOpenGrep)
 
 	report, err := doctor.Build(t.Context(), root, doctor.Options{})
 	if err != nil {
@@ -812,6 +796,9 @@ func TestRepoConfigOpenGrepPathIsIgnored(t *testing.T) {
 	}
 	if resolution.Config.OpenGrep.Path != "" {
 		t.Fatalf("expected shared opengrep.path to be ignored, got %#v", resolution.Config.OpenGrep)
+	}
+	if resolution.Config.OpenGrep.Mode != "managed" {
+		t.Fatalf("expected managed OpenGrep mode, got %#v", resolution.Config.OpenGrep)
 	}
 	if len(resolution.Warnings) == 0 {
 		t.Fatal("expected warning for ignored shared opengrep.path")

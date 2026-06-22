@@ -84,24 +84,9 @@ Run `setup` once after installing the plugin. Use `configure` later to inspect s
 
 ## OpenGrep Runtime
 
-OpenGrep does the actual scanning. greprules keeps runtime selection explicit so scans are reproducible and easy to debug.
+OpenGrep does the actual scanning. greprules always uses its managed OpenGrep runtime so standalone CLI scans and agent plugin scans run against the same predictable engine. The managed binary is stored in greprules' user cache and is not exposed as a shell `opengrep` command.
 
-| Mode | Use when |
-| --- | --- |
-| `managed` | You want greprules to install and use a managed OpenGrep binary. This is the default. |
-| `system` | You already have `opengrep` on `PATH` and want to use it. |
-| `path` | You want to point greprules at a specific OpenGrep executable. |
-
-For standalone CLI usage, the installer prepares the default managed runtime, and `greprules scan` can also install it automatically if it is missing. Agent plugins expose runtime configuration through their `/greprules configure` or `$greprules-configure` workflows.
-
-For agent/plugin automation only, the underlying settings command is:
-
-```bash
-greprules agent-config set opengrep.mode system --global
-greprules agent-config set opengrep.mode managed --global
-greprules agent-config set opengrep.mode path --global
-greprules agent-config set opengrep.path /absolute/path/to/opengrep --global
-```
+For standalone CLI usage, the installer prepares the managed runtime, and `greprules scan` can also install it automatically if it is missing. Agent plugin setup uses the same managed runtime cache.
 
 By default, greprules scans fetched greprules.io packs only. To also include OpenGrep's default auto-selected rules:
 
@@ -161,13 +146,13 @@ Install or update the standalone CLI:
 curl -fsSL https://greprules.io/install.sh | sh
 ```
 
-The installer downloads the latest GitHub Release for your platform, verifies it with `checksums.txt`, installs `greprules` into `$HOME/.local/bin` by default, prepares the managed OpenGrep runtime used by scans, and configures greprules to use that managed runtime.
+The installer downloads the latest GitHub Release for your platform, verifies it with `checksums.txt`, installs `greprules` into `$HOME/.local/bin` by default, and prepares the managed OpenGrep runtime used by scans.
 If the greprules.io shortcut is unavailable, use `https://raw.githubusercontent.com/greprules/greprules/main/install.sh` directly.
 
 To pin a version or install somewhere else:
 
 ```bash
-curl -fsSL https://greprules.io/install.sh | GREPRULES_VERSION=v0.3.0 sh
+curl -fsSL https://greprules.io/install.sh | GREPRULES_VERSION=v0.4.0 sh
 curl -fsSL https://greprules.io/install.sh | GREPRULES_INSTALL_DIR=/usr/local/bin sh
 ```
 
@@ -224,8 +209,6 @@ User/global config is JSON:
   "schemaVersion": "greprules.user.v1",
   "registry": "https://api.greprules.io",
   "opengrep": {
-    "mode": "system",
-    "path": "/Users/l0ch/.local/bin/opengrep",
     "version": "latest",
     "includeDefaultRules": false
   }
@@ -240,10 +223,10 @@ mode: auto
 packs:
   - go-security
 opengrep:
-  mode: managed
+  includeDefaultRules: false
 ```
 
-For safety, `opengrep.path` from shared `.greprules/config.yaml` is ignored. Put executable paths in user/global config, repo-local config, environment variables, or CLI flags.
+Legacy `opengrep.mode`, `opengrep.path`, `GREPRULES_ENGINE`, and `GREPRULES_OPENGREP_PATH` values are ignored. greprules always uses the managed runtime.
 
 For local worker development only:
 
