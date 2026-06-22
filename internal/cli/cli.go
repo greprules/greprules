@@ -35,6 +35,8 @@ func Execute(args []string, version string) int {
 		err = agent.RunStatusCommand(ctx, args[1:])
 	case "agent-feedback":
 		err = agent.RunFeedbackCommand(ctx, args[1:], version)
+	case "agent-proposal":
+		err = agent.RunProposalCommand(ctx, args[1:], version)
 	case "cleanup":
 		err = standalone.RunCleanup(args[1:])
 	default:

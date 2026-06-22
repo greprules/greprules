@@ -40,3 +40,16 @@ Use this flow only when the user explicitly asks Hermes to contribute greprules 
 9. If `GREPRULES_API_KEY` is missing, stop and explain that greprules.io community writes are login/API-key based.
 
 False-positive feedback is context-specific precision feedback. Do not describe it as a global rule downvote or direct quality-score penalty.
+
+Rule proposal contribution:
+
+Use this flow only when the user explicitly asks Hermes to turn an independently identified vulnerability into a greprules.io rule proposal. This flow is never automatic and must not run from hooks.
+
+1. Confirm the user wants to publish a public OpenGrep/Semgrep-compatible rule proposal.
+2. Run `greprules agent-proposal prepare --out <rule-proposal-bundle.json>`.
+3. Edit the bundle with rule YAML, title, description, license, provenance, generated metadata, vulnerable pattern, recommended fix, false-positive notes, and at least one positive and one negative public test fixture.
+4. Verify the bundle contains no TODO placeholders and no private repository URLs, raw local file paths, organization secrets, or unapproved source snippets.
+5. Preview uploaded fields and excluded fields for the user.
+6. Ask for explicit natural-language approval. If scope changes, update the bundle and preview again.
+7. After approval, run `greprules agent-proposal submit --bundle <rule-proposal-bundle.json> --consent-session <short-session-id>`.
+8. If `GREPRULES_API_KEY` is missing, stop and explain that greprules.io rule proposals require login/API-key based access.

@@ -23,6 +23,7 @@ Skills:
 - `/greprules:scan-target <path>`: select rule packs from explicit target context, fetch them if needed, scan files or directories, and summarize findings
 - `/greprules:scan-full`: select rule packs from repository context, fetch them if needed, scan the full repository, and summarize findings
 - `/greprules:submit-feedback`: review a previous `agent-result.json`, prepare a redacted feedback bundle, preview uploaded and excluded fields, and submit contextual feedback only after explicit user approval
+- `/greprules:propose-rule`: prepare an agent-generated rule proposal bundle with provenance and public tests, preview uploaded and excluded fields, and submit only after explicit user approval
 
 Automatic hooks:
 
@@ -35,4 +36,4 @@ Automatic hooks:
 - Hook state is written under the project `.greprules/plugin-data/claude-code/sessions/<session-id>/` directory by default. Override the provider state root with `GREPRULES_PLUGIN_STATE_DIR` only when needed.
 - User config and caches are intentionally not removed by Claude Code plugin uninstall. Use `greprules cleanup --config --plugin-cache --dry-run` to inspect cleanup targets.
 
-Community feedback submission requires authenticated greprules.io access through `GREPRULES_API_KEY`. It is never triggered automatically by hooks.
+Community feedback and rule proposal submission require authenticated greprules.io access through `GREPRULES_API_KEY`. They are never triggered automatically by hooks.

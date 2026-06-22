@@ -52,7 +52,7 @@ Aliases:
 /greprules-scan-full
 ```
 
-Hermes can also contribute scan feedback through the conversation workflow documented in the greprules skill. The agent reviews a previous `agent-result.json`, prepares a redacted feedback bundle with `greprules agent-feedback prepare`, previews uploaded and excluded fields, and runs `greprules agent-feedback submit` only after explicit user approval. Community feedback submission requires authenticated greprules.io access through `GREPRULES_API_KEY`; hooks never submit it automatically.
+Hermes can also contribute scan feedback and agent-generated rule proposals through the conversation workflow documented in the greprules skill. The agent prepares a redacted feedback bundle with `greprules agent-feedback prepare` or a rule proposal bundle with `greprules agent-proposal prepare`, previews uploaded and excluded fields, and runs the matching submit command only after explicit user approval. Community contribution requires authenticated greprules.io access through `GREPRULES_API_KEY`; hooks never submit it automatically.
 
 ## Hooks
 
