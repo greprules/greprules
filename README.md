@@ -161,7 +161,7 @@ Install or update the standalone CLI:
 curl -fsSL https://greprules.io/install.sh | sh
 ```
 
-The installer downloads the latest GitHub Release for your platform, verifies it with `checksums.txt`, installs `greprules` into `$HOME/.local/bin` by default, and prepares the managed OpenGrep runtime used by scans.
+The installer downloads the latest GitHub Release for your platform, verifies it with `checksums.txt`, installs `greprules` into `$HOME/.local/bin` by default, prepares the managed OpenGrep runtime used by scans, and configures greprules to use that managed runtime.
 If the greprules.io shortcut is unavailable, use `https://raw.githubusercontent.com/greprules/greprules/main/install.sh` directly.
 
 To pin a version or install somewhere else:
