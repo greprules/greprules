@@ -71,8 +71,8 @@ func Ensure(ctx context.Context, request Request, policy EnsurePolicy, ioOptions
 	result := EnsureResult{Config: cfg, Lock: lock, LockReady: lockReady}
 
 	if lockReady {
-		if policy.Verbose && !ioOptions.Quiet {
-			PrintLockedSelection(writer, lock)
+		if !ioOptions.Quiet {
+			PrintCachedPacks(writer, lock, policy.Verbose)
 		}
 	} else if policy.AutoFetch {
 		client := NewRegistry(cfg.Registry)
@@ -287,13 +287,28 @@ func PrintSelection(writer io.Writer, selection Selection, note string) {
 	}
 }
 
-func PrintLockedSelection(writer io.Writer, lock config.Lock) {
+func PrintCachedPacks(writer io.Writer, lock config.Lock, verbose bool) {
 	if len(lock.Packs) == 0 {
-		fmt.Fprintln(writer, "using locked rule packs: none")
+		fmt.Fprintln(writer, "using cached rule packs: none")
 		return
 	}
-	fmt.Fprintln(writer, "using locked rule packs:")
+	if !verbose {
+		packIDs := make([]string, 0, len(lock.Packs))
+		for _, pack := range lock.Packs {
+			packIDs = append(packIDs, pack.ID)
+		}
+		fmt.Fprintln(writer, "using cached rule packs:", strings.Join(packIDs, ", "))
+		return
+	}
+	fmt.Fprintln(writer, "using cached rule packs:")
 	for _, pack := range lock.Packs {
-		fmt.Fprintf(writer, "  %s version=%s rules=%d\n", pack.ID, pack.Version, pack.TotalRules)
+		fmt.Fprintf(writer, "  %s version=%s rules=%d rulePath=%s manifest=%s sha256=%s\n",
+			pack.ID,
+			pack.Version,
+			pack.TotalRules,
+			pack.RulePath,
+			pack.ManifestPath,
+			pack.SHA256,
+		)
 	}
 }
