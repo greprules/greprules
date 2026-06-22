@@ -37,6 +37,9 @@ func TestFeedbackPrepareBuildsRedactedBundle(t *testing.T) {
 	if bundle.Scan.GreprulesVersion != "vtest" {
 		t.Fatalf("unexpected greprules version: %s", bundle.Scan.GreprulesVersion)
 	}
+	if !strings.HasPrefix(bundle.Scan.SubmissionHash, "sha256:") || bundle.Scan.SubmissionHash != bundle.ResultHash {
+		t.Fatalf("unexpected submission hash: scan=%s result=%s", bundle.Scan.SubmissionHash, bundle.ResultHash)
+	}
 	if got, want := len(bundle.Findings), 1; got != want {
 		t.Fatalf("findings count = %d, want %d", got, want)
 	}
@@ -46,6 +49,12 @@ func TestFeedbackPrepareBuildsRedactedBundle(t *testing.T) {
 	}
 	if !strings.HasPrefix(finding.PathHash, "sha256:") || !strings.HasPrefix(finding.MessageHash, "sha256:") {
 		t.Fatalf("expected sha256 hashes, got path=%s message=%s", finding.PathHash, finding.MessageHash)
+	}
+	if got, want := len(bundle.Diagnostics), 1; got != want {
+		t.Fatalf("diagnostics count = %d, want %d", got, want)
+	}
+	if !strings.HasPrefix(bundle.Diagnostics[0].DiagnosticFingerprint, "sha256:") {
+		t.Fatalf("expected diagnostic fingerprint, got %s", bundle.Diagnostics[0].DiagnosticFingerprint)
 	}
 }
 
@@ -87,9 +96,19 @@ func TestFeedbackSubmitPostsScanDiagnosticsAndFindingFeedback(t *testing.T) {
 			if request.Consent.Mode != "explicit_user_approval" || request.Consent.RedactionPolicy != "no_source_code" {
 				t.Fatalf("unexpected consent: %#v", request.Consent)
 			}
+			if request.Scan.SubmissionHash != bundle.ResultHash {
+				t.Fatalf("unexpected submission hash: %s", request.Scan.SubmissionHash)
+			}
 			_, _ = w.Write([]byte(`{"success":true,"scan_id":"scan-1","findings":[{"id":"finding-1","rule_slug":"python-sql-injection","rule_version":"1.0.0","finding_fingerprint":"` + bundle.Findings[0].FindingFingerprint + `"}]}`))
 		case "/api/scan-diagnostics":
 			sawDiagnostics = true
+			var request rules.ScanDiagnosticCreateRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatal(err)
+			}
+			if request.Diagnostics[0].DiagnosticFingerprint == "" {
+				t.Fatalf("missing diagnostic fingerprint: %#v", request.Diagnostics[0])
+			}
 			_, _ = w.Write([]byte(`{"success":true,"diagnostic_ids":["diag-1"]}`))
 		case "/api/rules/python-sql-injection/findings/feedback":
 			sawFeedback = true

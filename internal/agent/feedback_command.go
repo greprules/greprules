@@ -110,6 +110,8 @@ func runFeedbackPrepare(args []string, version string) error {
 	fmt.Printf("prepared feedback bundle: %s\n", outputPath)
 	fmt.Printf("findings=%d diagnostics=%d feedback=%d\n", len(bundle.Findings), len(bundle.Diagnostics), len(bundle.Feedback))
 	if len(bundle.Findings) > 0 {
+		fmt.Println("Uploaded after approval: rule slug, rule version, finding fingerprint, hashed paths/messages, verdicts, and diagnostic hashes.")
+		fmt.Println("Not uploaded: source code, raw file paths, private repository URLs, or code snippets.")
 		fmt.Println("Add feedback entries to the bundle, get explicit user approval, then run agent-feedback submit.")
 	}
 	return nil
@@ -273,14 +275,16 @@ func BuildFeedbackBundle(resultPath string, version string) (FeedbackBundle, err
 		return findingKey(findings[i].RuleSlug, findings[i].RuleVersion, findings[i].FindingFingerprint) <
 			findingKey(findings[j].RuleSlug, findings[j].RuleVersion, findings[j].FindingFingerprint)
 	})
+	resultHash := sha256Field(string(resultData))
 	return FeedbackBundle{
 		SchemaVersion: feedbackBundleSchemaVersion,
 		GeneratedAt:   time.Now().UTC().Format(time.RFC3339),
-		ResultHash:    sha256Field(string(resultData)),
+		ResultHash:    resultHash,
 		Scan: rules.ScanContribution{
 			Source:           feedbackSource(),
 			GreprulesVersion: fallbackString(version, "dev"),
 			OpenGrepVersion:  fallbackString(result.Engine.Version, "unknown"),
+			SubmissionHash:   resultHash,
 			ProjectHash:      sha256Field(root),
 			Languages:        uniquePackLanguages(lock),
 			Frameworks:       []string{},
@@ -335,10 +339,11 @@ func manifestRuleKeys(rule rules.ManifestRule) []string {
 
 func diagnosticContribution(kind string, severity string, value string) rules.ScanDiagnosticContribution {
 	return rules.ScanDiagnosticContribution{
-		Kind:        kind,
-		Severity:    severity,
-		MessageHash: sha256Field(value),
-		Count:       1,
+		DiagnosticFingerprint: diagnosticFingerprint(kind, severity, value),
+		Kind:                  kind,
+		Severity:              severity,
+		MessageHash:           sha256Field(value),
+		Count:                 1,
 		Details: map[string]any{
 			"source": "agent-result",
 		},
@@ -399,6 +404,10 @@ func findingFingerprint(ruleSlug string, ruleVersion string, finding Finding) st
 		fmt.Sprint(finding.End.Col),
 		finding.Message,
 	}, "\x00"))
+}
+
+func diagnosticFingerprint(kind string, severity string, value string) string {
+	return sha256Field(strings.Join([]string{kind, severity, value}, "\x00"))
 }
 
 func findingKey(ruleSlug string, ruleVersion string, fingerprint string) string {

@@ -23,6 +23,7 @@ type ScanContribution struct {
 	Source           string   `json:"source"`
 	GreprulesVersion string   `json:"greprules_version"`
 	OpenGrepVersion  string   `json:"opengrep_version"`
+	SubmissionHash   string   `json:"submission_hash"`
 	ProjectHash      string   `json:"project_hash"`
 	Languages        []string `json:"languages"`
 	Frameworks       []string `json:"frameworks"`
@@ -44,18 +45,19 @@ type ScanFindingContribution struct {
 }
 
 type ScanDiagnosticContribution struct {
-	FindingID      string         `json:"finding_id,omitempty"`
-	RuleSlug       string         `json:"rule_slug,omitempty"`
-	Kind           string         `json:"kind"`
-	Severity       string         `json:"severity"`
-	Language       string         `json:"language,omitempty"`
-	Parser         string         `json:"parser,omitempty"`
-	FileExtension  string         `json:"file_extension,omitempty"`
-	PathHash       string         `json:"path_hash,omitempty"`
-	MessageHash    string         `json:"message_hash"`
-	DiagnosticCode string         `json:"diagnostic_code,omitempty"`
-	Count          int            `json:"count"`
-	Details        map[string]any `json:"details"`
+	FindingID             string         `json:"finding_id,omitempty"`
+	RuleSlug              string         `json:"rule_slug,omitempty"`
+	DiagnosticFingerprint string         `json:"diagnostic_fingerprint"`
+	Kind                  string         `json:"kind"`
+	Severity              string         `json:"severity"`
+	Language              string         `json:"language,omitempty"`
+	Parser                string         `json:"parser,omitempty"`
+	FileExtension         string         `json:"file_extension,omitempty"`
+	PathHash              string         `json:"path_hash,omitempty"`
+	MessageHash           string         `json:"message_hash"`
+	DiagnosticCode        string         `json:"diagnostic_code,omitempty"`
+	Count                 int            `json:"count"`
+	Details               map[string]any `json:"details"`
 }
 
 type ScanCreateRequest struct {
