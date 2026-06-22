@@ -124,6 +124,86 @@ printf '{"results":[]}\n' > "$out"
 	}
 }
 
+func TestRunAgentScanDirectUsesSessionRunOutputDirByDefault(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake runtime is unix-only")
+	}
+	root, _ := setupAgentPluginTestEnv(t)
+	t.Setenv("GREPRULES_AGENT_PROVIDER", "codex")
+	t.Setenv("GREPRULES_AGENT_SESSION_ID", "session-123")
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.test\n")
+	writeFile(t, filepath.Join(root, "app.mjs"), "console.log(1)\n")
+	configureAgentScanProject(t, root, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf 'opengrep 9.8.7\n'
+  exit 0
+fi
+out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --output) shift; out="$1" ;;
+  esac
+  shift
+done
+printf '{"results":[]}\n' > "$out"
+`)
+
+	var stdout bytes.Buffer
+	withStdout(t, &stdout, func() {
+		if err := agent.RunScanCommand(t.Context(), []string{
+			"scan",
+			"--root", root,
+			"--label", "full",
+			"--format", "json",
+			"--no-sarif",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var outcome agent.ScanOutcome
+	if err := json.Unmarshal(stdout.Bytes(), &outcome); err != nil {
+		t.Fatalf("expected JSON outcome, got %q: %v", stdout.String(), err)
+	}
+	if outcome.ResultPath == "" {
+		t.Fatalf("expected resultPath in outcome: %#v", outcome)
+	}
+	expectedPrefix := filepath.Join(root, ".greprules", "plugin-data", "codex", "sessions", "session-123", "runs") + string(os.PathSeparator)
+	if !strings.HasPrefix(outcome.ResultPath, expectedPrefix) {
+		t.Fatalf("expected session run result under %s, got %s", expectedPrefix, outcome.ResultPath)
+	}
+	if !strings.HasSuffix(outcome.ResultPath, filepath.Join("agent-result.json")) {
+		t.Fatalf("expected agent-result.json path, got %s", outcome.ResultPath)
+	}
+	assertFileExists(t, outcome.ResultPath)
+	assertFileExists(t, filepath.Join(filepath.Dir(outcome.ResultPath), "scan.json"))
+	assertNoFile(t, filepath.Join(root, ".greprules", "out", "agent-result.json"))
+	if !strings.Contains(outcome.Message, "Full result: "+outcome.ResultPath) {
+		t.Fatalf("expected message to point at run result path, got %q", outcome.Message)
+	}
+
+	stdout.Reset()
+	withStdout(t, &stdout, func() {
+		if err := agent.RunScanCommand(t.Context(), []string{
+			"scan",
+			"--root", root,
+			"--label", "full",
+			"--format", "json",
+			"--no-sarif",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var secondOutcome agent.ScanOutcome
+	if err := json.Unmarshal(stdout.Bytes(), &secondOutcome); err != nil {
+		t.Fatalf("expected second JSON outcome, got %q: %v", stdout.String(), err)
+	}
+	if secondOutcome.ResultPath == "" || secondOutcome.ResultPath == outcome.ResultPath {
+		t.Fatalf("expected each scan run to get a unique result path, first=%s second=%s", outcome.ResultPath, secondOutcome.ResultPath)
+	}
+	assertFileExists(t, outcome.ResultPath)
+	assertFileExists(t, secondOutcome.ResultPath)
+}
+
 func TestRunAgentScanDirectRequestsPackSelectionWithTargetsFrom(t *testing.T) {
 	root, state := setupAgentPluginTestEnv(t)
 	writeFile(t, filepath.Join(root, "query.sql"), "select * from users\n")
@@ -177,10 +257,13 @@ exit 0
 	if outcome.Status != "needs_pack_selection" {
 		t.Fatalf("expected needs_pack_selection, got %#v", outcome)
 	}
-	for _, want := range []string{"greprules agent-scan recommend", "--targets-from", targetsPath, "greprules fetch", "<slug>", "Do not invent pack slugs"} {
+	for _, want := range []string{"selectionContext.detection", "selectionContext.targets", "selectionContext.availablePacks", "greprules fetch", "<slug>", "Do not invent pack slugs"} {
 		if !strings.Contains(outcome.Message, want) {
 			t.Fatalf("message missing %q: %q", want, outcome.Message)
 		}
+	}
+	if strings.Contains(outcome.Message, "agent-scan recommend") {
+		t.Fatalf("pack selection guidance should not call recommend: %q", outcome.Message)
 	}
 	if strings.Contains(outcome.Message, "--agent") {
 		t.Fatalf("agent recommendation guidance should not use standalone --agent: %q", outcome.Message)
@@ -191,18 +274,32 @@ exit 0
 	if strings.Contains(outcome.Message, "--output-dir") {
 		t.Fatalf("recommend guidance should not include scan-only output-dir: %q", outcome.Message)
 	}
+	if outcome.SelectionContext == nil {
+		t.Fatalf("expected selection context in needs_pack_selection outcome: %#v", outcome)
+	}
+	if outcome.SelectionContext.SchemaVersion != "greprules.selection.agent.v1" {
+		t.Fatalf("unexpected selection context schema: %#v", outcome.SelectionContext)
+	}
+	if !outcome.SelectionContext.NeedsAgentSelection {
+		t.Fatalf("expected selection context to require agent selection: %#v", outcome.SelectionContext)
+	}
+	if len(outcome.SelectionContext.Targets) != 1 || outcome.SelectionContext.Targets[0] != "query.sql" {
+		t.Fatalf("expected selection context targets from targets file, got %#v", outcome.SelectionContext.Targets)
+	}
+	if len(outcome.SelectionContext.AvailablePacks) != 0 || len(outcome.SelectionContext.Candidates) != 0 {
+		t.Fatalf("expected empty available packs and candidates, got %#v", outcome.SelectionContext)
+	}
 }
 
-func TestRunAgentRecommendDirectUsesTargetsFrom(t *testing.T) {
+func TestRunAgentScanDirectSelectionContextIncludesAvailablePacks(t *testing.T) {
 	root, state := setupAgentPluginTestEnv(t)
-	writeFile(t, filepath.Join(root, "pyproject.toml"), "[project]\ndependencies = [\"fastapi\"]\n")
-	writeFile(t, filepath.Join(root, "src", "main.py"), "from fastapi import FastAPI\n")
+	writeFile(t, filepath.Join(root, "query.sql"), "select * from users\n")
 	targetsPath := filepath.Join(state, "scan-targets.txt")
-	writeFile(t, targetsPath, "src/main.py\n")
+	writeFile(t, targetsPath, "query.sql\n")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/packs" {
 			w.Header().Set("content-type", "application/json")
-			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"python-web-security","name":"Python Web Security","languages":["python"],"selection":{"kind":"framework","languages":["python"],"frameworks":["fastapi"],"source_types":[],"tags":[]}}]}`))
+			_, _ = w.Write([]byte(`{"success":true,"packs":[{"slug":"ruby-security","name":"Ruby Security","languages":["ruby"],"selection":{"kind":"language","languages":["ruby"],"frameworks":[],"source_types":[],"tags":[]}}]}`))
 			return
 		}
 		http.NotFound(w, r)
@@ -217,27 +314,33 @@ func TestRunAgentRecommendDirectUsesTargetsFrom(t *testing.T) {
 	var stdout bytes.Buffer
 	withStdout(t, &stdout, func() {
 		if err := agent.RunScanCommand(t.Context(), []string{
-			"recommend",
+			"scan",
 			"--root", root,
+			"--format", "json",
 			"--targets-from", targetsPath,
 		}); err != nil {
 			t.Fatal(err)
 		}
 	})
-	var context struct {
-		SchemaVersion string `json:"schemaVersion"`
-		Candidates    []struct {
-			PackID string `json:"packId"`
-		} `json:"candidates"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &context); err != nil {
+	var outcome agent.ScanOutcome
+	if err := json.Unmarshal(stdout.Bytes(), &outcome); err != nil {
 		t.Fatalf("expected JSON outcome, got %q: %v", stdout.String(), err)
 	}
-	if context.SchemaVersion != "greprules.recommend.agent.v1" {
+	if outcome.Status != "needs_pack_selection" {
+		t.Fatalf("expected needs_pack_selection, got %#v", outcome)
+	}
+	if outcome.SelectionContext == nil {
+		t.Fatalf("expected selectionContext in outcome: %#v", outcome)
+	}
+	context := outcome.SelectionContext
+	if context.SchemaVersion != "greprules.selection.agent.v1" {
 		t.Fatalf("unexpected schema: %#v", context)
 	}
-	if len(context.Candidates) != 1 || context.Candidates[0].PackID != "python-web-security" {
-		t.Fatalf("unexpected candidates: %#v", context.Candidates)
+	if len(context.AvailablePacks) != 1 || context.AvailablePacks[0].Slug != "ruby-security" {
+		t.Fatalf("unexpected available packs: %#v", context.AvailablePacks)
+	}
+	if len(context.Candidates) != 0 {
+		t.Fatalf("expected no candidates for SQL target and ruby pack, got %#v", context.Candidates)
 	}
 }
 
@@ -295,5 +398,12 @@ func TestRunAgentScanEditedCommandRemoved(t *testing.T) {
 	err := agent.RunScanCommand(t.Context(), []string{"edited"})
 	if err == nil || !strings.Contains(err.Error(), "unknown agent-scan command: edited") {
 		t.Fatalf("expected edited subcommand to be removed, got %v", err)
+	}
+}
+
+func TestRunAgentRecommendCommandRemoved(t *testing.T) {
+	err := agent.RunScanCommand(t.Context(), []string{"recommend"})
+	if err == nil || !strings.Contains(err.Error(), "unknown agent-scan command: recommend") {
+		t.Fatalf("expected recommend subcommand to be removed, got %v", err)
 	}
 }

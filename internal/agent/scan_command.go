@@ -12,17 +12,18 @@ import (
 	"strings"
 
 	"github.com/greprules/greprules/internal/cmdutil"
-	"github.com/greprules/greprules/internal/config"
 	"github.com/greprules/greprules/internal/doctor"
 	"github.com/greprules/greprules/internal/rules"
 )
 
 type ScanOutcome struct {
-	Status      string   `json:"status"`
-	Message     string   `json:"message,omitempty"`
-	Summary     string   `json:"summary,omitempty"`
-	Targets     []string `json:"targets,omitempty"`
-	TargetsPath string   `json:"targetsPath,omitempty"`
+	Status           string              `json:"status"`
+	Message          string              `json:"message,omitempty"`
+	Summary          string              `json:"summary,omitempty"`
+	ResultPath       string              `json:"resultPath,omitempty"`
+	Targets          []string            `json:"targets,omitempty"`
+	TargetsPath      string              `json:"targetsPath,omitempty"`
+	SelectionContext *rules.AgentContext `json:"selectionContext,omitempty"`
 }
 
 type scanMessageOptions struct {
@@ -62,56 +63,13 @@ type scanIO struct {
 
 func RunScanCommand(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: greprules agent-scan scan|recommend")
+		return errors.New("usage: greprules agent-scan scan")
 	}
 	switch args[0] {
 	case "scan":
 		return runScanDirect(ctx, args[1:])
-	case "recommend":
-		return runRecommendDirect(ctx, args[1:])
 	default:
 		return fmt.Errorf("unknown agent-scan command: %s", args[0])
-	}
-}
-
-func runRecommendDirect(ctx context.Context, args []string) error {
-	fs := flag.NewFlagSet("agent-scan recommend", flag.ContinueOnError)
-	rootFlag := fs.String("root", ".", "repo root or child path")
-	changed := fs.Bool("changed", false, "recommend for git changed, staged, and untracked files")
-	targetsFrom := fs.String("targets-from", "", "newline-delimited file of scan targets relative to root")
-	format := fs.String("format", "json", "output format: json")
-	targets, err := cmdutil.ParseInterspersed(fs, args)
-	if err != nil {
-		return err
-	}
-	root, err := cmdutil.ResolveCommandRoot(*rootFlag, *changed)
-	if err != nil {
-		return err
-	}
-	rawTargets, err := rules.CollectTargetInputs(root, targets, *targetsFrom, *changed)
-	if err != nil {
-		return err
-	}
-	root, rawTargets, err = cmdutil.MaybePromoteSingleExternalTargetToRoot(root, rawTargets, *targetsFrom, cmdutil.HasFlag(args, "root"), *changed)
-	if err != nil {
-		return err
-	}
-	resolution, _ := config.LoadEffectiveConfig(root)
-	cfg := resolution.Config
-	result, err := rules.DetectForTargets(root, rawTargets)
-	if err != nil {
-		return err
-	}
-	packs, err := rules.NewRegistry(cfg.Registry).ListPacks(ctx)
-	if err != nil {
-		return fmt.Errorf("list registry packs: %w", err)
-	}
-	candidates := rules.ForDetection(result, packs)
-	switch *format {
-	case "json", "":
-		return cmdutil.PrintJSON(rules.BuildAgentContext(result, packs, candidates))
-	default:
-		return fmt.Errorf("unknown output format: %s", *format)
 	}
 }
 
@@ -185,6 +143,14 @@ func printScanOutcome(outcome ScanOutcome, format string) error {
 		if outcome.Message != "" {
 			fmt.Println(outcome.Message)
 		}
+		if outcome.Status == "needs_pack_selection" && outcome.SelectionContext != nil {
+			data, err := json.MarshalIndent(outcome.SelectionContext, "", "  ")
+			if err != nil {
+				return err
+			}
+			fmt.Println("selectionContext:")
+			fmt.Println(string(data))
+		}
 	default:
 		return fmt.Errorf("unknown output format: %s", format)
 	}
@@ -218,18 +184,22 @@ func runScanAfterReadiness(ctx context.Context, options directScanOptions) (Scan
 		prepareResult, err := rules.Ensure(ctx, packs, rules.EnsurePolicy{AutoFetch: true}, rules.EnsureIO{Quiet: true, Stdout: &fetchOutput})
 		if err != nil {
 			if errors.Is(err, rules.ErrNoPacksSelected) {
+				context := rules.BuildSelectionContext(prepareResult.Selection)
 				return ScanOutcome{
-					Status:  "needs_pack_selection",
-					Message: packSelectionMessage(request),
+					Status:           "needs_pack_selection",
+					Message:          packSelectionMessage(request),
+					SelectionContext: &context,
 				}, nil
 			}
 			message := strings.TrimSpace(fetchOutput.String() + "\n" + err.Error())
 			return ScanOutcome{Status: "skipped", Message: options.Messages.FetchFailedPrefix + message}, nil
 		}
 		if !prepareResult.LockReady {
+			context := rules.BuildSelectionContext(prepareResult.Selection)
 			return ScanOutcome{
-				Status:  "needs_pack_selection",
-				Message: packSelectionMessage(request),
+				Status:           "needs_pack_selection",
+				Message:          packSelectionMessage(request),
+				SelectionContext: &context,
 			}, nil
 		}
 		report, err = doctor.Build(ctx, packs.Root, doctor.Options{
@@ -250,16 +220,20 @@ func runScanAfterReadiness(ctx context.Context, options directScanOptions) (Scan
 		return ScanOutcome{Status: "skipped", Message: options.Messages.ReadinessFailedPrefix + recommended}, nil
 	}
 
+	if request.OutputDir == "" {
+		request.OutputDir = defaultAgentRunOutputDir(options.Label)
+	}
 	var scanOutput bytes.Buffer
 	if err := runStructuredScan(ctx, request, scanIO{Quiet: true, Stdout: &scanOutput, Stderr: &scanOutput}); err != nil {
 		message := strings.TrimSpace(scanOutput.String() + "\nerror: " + err.Error())
 		return ScanOutcome{Status: "failed", Message: options.Messages.ScanFailedPrefix + message}, nil
 	}
+	resultPath := resultPath(packs.Root, request.OutputDir)
 	summary := SummarizeAgentResult(
-		resultPath(packs.Root, request.OutputDir),
+		resultPath,
 		SummaryOptions{Automatic: options.Automatic, Label: options.Label},
 	)
-	return ScanOutcome{Status: "scanned", Message: summary, Summary: summary}, nil
+	return ScanOutcome{Status: "scanned", Message: summary, Summary: summary, ResultPath: resultPath}, nil
 }
 
 func resultPath(root string, outputDir string) string {
@@ -274,16 +248,8 @@ func resultPath(root string, outputDir string) string {
 
 func packSelectionMessage(request scanRequest) string {
 	packs := request.RulePacks
-	recommendArgs := []string{"greprules", "agent-scan", "recommend", "--root", packs.Root, "--format", "json"}
-	if packs.Changed {
-		recommendArgs = append(recommendArgs, "--changed")
-	}
-	if packs.TargetsFrom != "" {
-		recommendArgs = append(recommendArgs, "--targets-from", packs.TargetsFrom)
-	}
-	recommendArgs = append(recommendArgs, packs.Targets...)
 	fetchArgs := []string{"greprules", "fetch", "--root", packs.Root, "<slug>"}
-	return "greprules needs agent-assisted rule-pack selection before scanning. Run `" + strings.Join(recommendArgs, " ") + "`, inspect detection, targets, availablePacks, and candidates, choose explicit pack slugs that match the scan target, run `" + strings.Join(fetchArgs, " ") + "` for each chosen pack, then rerun the greprules scan. Do not invent pack slugs."
+	return "greprules needs agent-assisted rule-pack selection before scanning. Inspect selectionContext.detection, selectionContext.targets, selectionContext.availablePacks, and selectionContext.candidates from this scan response, choose explicit pack slugs that match the scan target, run `" + strings.Join(fetchArgs, " ") + "` for each chosen pack, then rerun the greprules scan. Do not invent pack slugs."
 }
 
 func runStructuredScan(ctx context.Context, request scanRequest, ioOptions scanIO) error {

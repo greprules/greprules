@@ -17,24 +17,26 @@ type Candidate struct {
 type AgentContext struct {
 	SchemaVersion       string        `json:"schemaVersion"`
 	Root                string        `json:"root"`
-	Targets             []string      `json:"targets,omitempty"`
+	Targets             []string      `json:"targets"`
 	Detection           Result        `json:"detection"`
 	Candidates          []Candidate   `json:"candidates"`
-	AvailablePacks      []PackSummary `json:"availablePacks,omitempty"`
+	AvailablePacks      []PackSummary `json:"availablePacks"`
 	NeedsAgentSelection bool          `json:"needsAgentSelection"`
 	Guidance            []string      `json:"guidance"`
 }
 
-func BuildAgentContext(result Result, available []PackSummary, candidates []Candidate) AgentContext {
+func BuildSelectionContext(selection Selection) AgentContext {
+	result := selection.Detection
 	return AgentContext{
-		SchemaVersion:       "greprules.recommend.agent.v1",
+		SchemaVersion:       "greprules.selection.agent.v1",
 		Root:                result.Root,
-		Targets:             result.Targets,
+		Targets:             append([]string{}, result.Targets...),
 		Detection:           result,
-		Candidates:          candidates,
-		AvailablePacks:      available,
-		NeedsAgentSelection: len(candidates) == 0,
+		Candidates:          append([]Candidate{}, selection.Candidates...),
+		AvailablePacks:      append([]PackSummary{}, selection.AvailablePacks...),
+		NeedsAgentSelection: len(selection.PackIDs) == 0,
 		Guidance: []string{
+			"Inspect this selectionContext from the agent-scan scan response.",
 			"Use candidates when confidence and target context match the user's scan request.",
 			"If candidates are empty or incomplete, inspect targets and availablePacks, choose explicit pack slugs, then run greprules fetch <slug>.",
 			"Prefer target-specific language/framework packs over broad repository packs for edited-file or explicit-target scans.",

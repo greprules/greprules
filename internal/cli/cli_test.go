@@ -660,7 +660,16 @@ exit 2
 		}
 	})
 
-	data, err := os.ReadFile(filepath.Join(root, ".greprules", "out", "agent-result.json"))
+	var outcome struct {
+		ResultPath string `json:"resultPath"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &outcome); err != nil {
+		t.Fatalf("expected JSON outcome, got %q: %v", stdout.String(), err)
+	}
+	if outcome.ResultPath == "" {
+		t.Fatalf("expected JSON outcome to report resultPath, got %q", stdout.String())
+	}
+	data, err := os.ReadFile(outcome.ResultPath)
 	if err != nil {
 		t.Fatal(err)
 	}

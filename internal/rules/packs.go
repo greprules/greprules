@@ -25,10 +25,11 @@ type Request struct {
 }
 
 type Selection struct {
-	Detection  Result
-	Candidates []Candidate
-	PackIDs    []string
-	Source     string
+	Detection      Result
+	Candidates     []Candidate
+	AvailablePacks []PackSummary
+	PackIDs        []string
+	Source         string
 }
 
 type FetchOptions struct {
@@ -161,10 +162,11 @@ func SelectForTargets(ctx context.Context, root string, cfg config.Config, clien
 	}
 	candidates := ForDetection(result, available)
 	return Selection{
-		Detection:  result,
-		Candidates: candidates,
-		PackIDs:    PackIDs(candidates),
-		Source:     "detected",
+		Detection:      result,
+		Candidates:     candidates,
+		AvailablePacks: available,
+		PackIDs:        PackIDs(candidates),
+		Source:         "detected",
 	}, nil
 }
 

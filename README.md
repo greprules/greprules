@@ -121,10 +121,10 @@ The important files are:
 user state: projects/<project-key>/lock.json
 user cache: packs/<slug>/<sha>/...
 .greprules/config.yaml
-.greprules/plugin-data/<provider>/sessions/<session-id>/out/agent-result.json
+.greprules/plugin-data/<provider>/sessions/<session-id>/runs/<run-id>/agent-result.json
 ```
 
-Standalone CLI scans follow OpenGrep output behavior: stdout and files are controlled by the OpenGrep arguments you pass, such as `--json`, `--sarif`, and `--output`. Standalone project locks are stored in user state keyed by the canonical project root, while rule pack artifacts are stored in user cache and reused across projects. Agent scans use the hidden `agent-scan` command and write structured results under `.greprules/out/agent-result.json` or session-local plugin output paths.
+Standalone CLI scans follow OpenGrep output behavior: stdout and files are controlled by the OpenGrep arguments you pass, such as `--json`, `--sarif`, and `--output`. Standalone project locks are stored in user state keyed by the canonical project root, while rule pack artifacts are stored in user cache and reused across projects. Agent scans use the hidden `agent-scan` command and write structured results under provider/session scoped run directories. Read the `Full result:` path printed by `agent-scan`; do not infer it from a shared output path.
 
 Generated local paths are ignored automatically in git repositories:
 
@@ -152,7 +152,7 @@ If the greprules.io shortcut is unavailable, use `https://raw.githubusercontent.
 To pin a version or install somewhere else:
 
 ```bash
-curl -fsSL https://greprules.io/install.sh | GREPRULES_VERSION=v0.4.0 sh
+curl -fsSL https://greprules.io/install.sh | GREPRULES_VERSION=v0.4.1 sh
 curl -fsSL https://greprules.io/install.sh | GREPRULES_INSTALL_DIR=/usr/local/bin sh
 ```
 

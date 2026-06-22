@@ -40,10 +40,10 @@ func runScan(ctx context.Context, options runScanOptions) error {
 	}
 	lock, err := config.LoadLock(options.Root)
 	if err != nil {
-		return fmt.Errorf("lockfile missing; run greprules agent-scan recommend, then fetch explicit packs with greprules fetch <slug>: %w", err)
+		return fmt.Errorf("lockfile missing; rerun greprules agent-scan scan to select packs automatically, or fetch explicit packs with greprules fetch <slug>: %w", err)
 	}
 	if missing := config.MissingLockRulePaths(options.Root, lock); len(missing) > 0 {
-		return fmt.Errorf("locked rule pack artifacts are missing: %s; run greprules agent-scan recommend, then fetch explicit packs with greprules fetch <slug>", strings.Join(missing, ", "))
+		return fmt.Errorf("locked rule pack artifacts are missing: %s; rerun greprules agent-scan scan to refresh selected packs, or fetch explicit packs with greprules fetch <slug>", strings.Join(missing, ", "))
 	}
 	runtimeInfo, err := opengrep.ResolveFromConfig(lock, cfg, opengrep.ConfigOverrides{
 		Version: options.OpenGrepVersion,

@@ -15,14 +15,12 @@ Workflow:
 2. Resolve the greprules command from the installed plugin root and use its bundled `bin/greprules` wrapper. Do not require `greprules` to be installed on shell `PATH`; in this workflow, `greprules ...` means the resolved wrapper command.
 3. Run `greprules agent-status --format json`.
 4. If `opengrep.active.ok` is false, use `$greprules-setup` to prepare the managed OpenGrep runtime before scanning.
-5. If `lock.exists` is false and `registry.ok` is true, run `greprules agent-scan recommend --format json <path>` for each requested path.
-6. Inspect `detection`, requested targets, `availablePacks`, and `candidates`; choose explicit pack slugs that match the target paths. Do not invent pack slugs.
-7. Fetch the selected packs with `greprules fetch <slug> [<slug>...]`. If no available pack fits the target, report that pack selection needs user input instead of running a broad fetch.
-8. If OpenGrep is still not ready, stop and summarize `recommendedCommands`.
-9. Run `greprules agent-scan scan <path> [<path>...]` for the requested paths.
-10. Read `.greprules/out/agent-result.json`.
-11. Summarize findings by rule id, severity, file, line, and message.
-12. Classify findings as true positive, false positive, or needs investigation. Do not edit code, add suppressions, upload rules, or create rule drafts unless the user explicitly asks.
+5. Run `greprules agent-scan scan <path> [<path>...]` for the requested paths.
+6. If the scan returns `needs_pack_selection`, inspect `selectionContext.detection`, requested targets, `selectionContext.availablePacks`, and `selectionContext.candidates`; choose explicit pack slugs that match the target paths, fetch them with `greprules fetch <slug> [<slug>...]`, then rerun the scan. Do not invent pack slugs.
+7. If OpenGrep is still not ready, stop and summarize `recommendedCommands`.
+8. Read the `Full result:` path reported in the scan summary.
+9. Summarize findings by rule id, severity, file, line, and message.
+10. Classify findings as true positive, false positive, or needs investigation. Do not edit code, add suppressions, upload rules, or create rule drafts unless the user explicitly asks.
 
 Fallbacks:
 

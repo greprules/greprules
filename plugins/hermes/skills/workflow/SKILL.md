@@ -19,7 +19,7 @@ Available slash commands:
 
 Aliases are also available: `/greprules-scan-edited`, `/greprules-scan-working-tree`, `/greprules-scan-target <path>`, and `/greprules-scan-full`.
 
-When rule packs are not fetched yet, use agent-assisted selection: inspect the target files and run `greprules agent-scan recommend --format json` with positional target paths, `--changed`, or `--targets-from` matching the scan scope through the resolved plugin command. Edited-file scans pass absolute explicit targets; git changed-file selection is reserved for `/greprules scan-working-tree`. Choose only slugs present in `availablePacks`, fetch them with the explicit fetch command shown in the scan message, then rerun the scan.
+When rule-pack selection needs agent input, inspect the `selectionContext` returned by `greprules agent-scan scan`. Edited-file scans pass absolute explicit targets; git changed-file selection is reserved for `/greprules scan-working-tree`. Choose only slugs present in `selectionContext.availablePacks`, fetch them with the explicit fetch command shown in the scan message, then rerun the scan.
 
 The `pre_llm_call` hook can inject compact edited-file scan results before the next model turn when Hermes greprules `autoScan=true`. Automatic scan context injection is disabled by default; use `/greprules configure auto-scan true` to enable it persistently while keeping manual commands available.
 

@@ -57,7 +57,7 @@ Aliases:
 - `post_tool_call` tracks files edited through Hermes file tools under `.greprules/plugin-data/hermes/sessions/<session-or-task-id>/`.
 - `pre_llm_call` scans tracked edited files for the current Hermes session before the next model turn when Hermes greprules `autoScan=true` and injects a compact result summary as context. The adapter passes absolute explicit targets; edited-file scans do not use git changed-file tracking. If rule-pack selection is ambiguous, it returns instructions to inspect available packs and fetch explicit slugs before rerunning the scan.
 
-Edited-file plugin scans write session-local results under `.greprules/plugin-data/hermes/sessions/<session-or-task-id>/out/agent-result.json`. Agent working-tree, target, and full scans use the CLI output directory, usually `.greprules/out/agent-result.json`. `/greprules scan-working-tree` is the git-based changed-file scan path.
+Plugin agent scans write results under `.greprules/plugin-data/hermes/sessions/<session-or-task-id>/runs/<run-id>/agent-result.json`. Each scan run gets its own directory, so full, target, working-tree, and edited-file scans do not overwrite each other. Read the `Full result:` path printed by the scan summary. `/greprules scan-working-tree` is the git-based changed-file scan path.
 
 A successful edited-file scan clears dirty state for that Hermes session; readiness failures, pack-selection gaps, and too-many-target skips keep the dirty state for a later scan.
 

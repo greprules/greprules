@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
@@ -326,8 +327,17 @@ def _last_summary_path(session_dir: Path) -> Path:
     return session_dir / "last-summary.txt"
 
 
-def _output_dir(session_dir: Path) -> Path:
-    return session_dir / "out"
+def _output_dir(session_dir: Path, label: str) -> Path:
+    return session_dir / "runs" / _run_id(label)
+
+
+def _run_id(label: str) -> str:
+    safe_label = _SAFE_SESSION_RE.sub("-", label.strip())[:40].strip(".-")
+    parts = [time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())]
+    if safe_label:
+        parts.append(safe_label)
+    parts.append(uuid.uuid4().hex[:12])
+    return "-".join(parts)
 
 
 def _last_scan_recent(session_dir: Path, agent: Dict[str, Any]) -> bool:
@@ -511,6 +521,22 @@ def _too_many_targets_message(count: int, limit: int, auto: bool) -> str:
     )
 
 
+def _scan_message_with_selection_context(payload: Dict[str, Any]) -> str:
+    message = str(payload.get("message") or "").strip()
+    if payload.get("status") != "needs_pack_selection":
+        return message
+    context = payload.get("selectionContext")
+    if not isinstance(context, dict):
+        return message
+    try:
+        context_text = json.dumps(context, indent=2, sort_keys=True)
+    except Exception:
+        return message
+    if message:
+        return message + "\nselectionContext:\n" + context_text
+    return "selectionContext:\n" + context_text
+
+
 def _scan_dirty(root: Path, session_key: str, *, auto: bool) -> Optional[str]:
     session_dir = _session_state_dir(root, session_key)
     if session_dir is None:
@@ -539,7 +565,7 @@ def _scan_dirty(root: Path, session_key: str, *, auto: bool) -> Optional[str]:
         "--targets-from",
         str(_scan_targets_path(session_dir)),
         "--output-dir",
-        str(_output_dir(session_dir)),
+        str(_output_dir(session_dir, "edited-file")),
         "--format",
         "json",
     ]
@@ -554,7 +580,7 @@ def _scan_dirty(root: Path, session_key: str, *, auto: bool) -> Optional[str]:
         return "greprules edited-file scan failed: could not parse agent-scan output"
     if not isinstance(payload, dict):
         return None
-    message = str(payload.get("message") or "").strip()
+    message = _scan_message_with_selection_context(payload)
     if payload.get("status") == "scanned":
         if message:
             try:
@@ -590,7 +616,7 @@ def _scan_with_args(root: Path, args: Sequence[str], label: str) -> str:
     code, out, err = _run(["agent-scan", "scan", "--root", str(root), "--label", label, *args], root, timeout=900)
     if code != 0:
         return "greprules scan failed: " + (err or out or "unknown scan failure").strip()
-    return out.strip() or f"greprules {label} scan finished. Full result: {root / '.greprules' / 'out' / 'agent-result.json'}"
+    return out.strip() or f"greprules {label} scan finished, but no result path was reported."
 
 
 def _format_status(root: Path) -> str:

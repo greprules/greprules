@@ -14,6 +14,7 @@ import re
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -226,8 +227,17 @@ def last_summary_path(session_dir: Path) -> Path:
     return session_dir / "last-summary.txt"
 
 
-def output_dir(session_dir: Path) -> Path:
-    return session_dir / "out"
+def run_output_dir(session_dir: Path, label: str) -> Path:
+    return session_dir / "runs" / run_id(label)
+
+
+def run_id(label: str) -> str:
+    safe_label = SAFE_SESSION_RE.sub("-", label.strip())[:40].strip(".-")
+    parts = [time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())]
+    if safe_label:
+        parts.append(safe_label)
+    parts.append(uuid.uuid4().hex[:12])
+    return "-".join(parts)
 
 
 def codex_config_path() -> Path:
@@ -669,7 +679,7 @@ def scan_session(root: Path, session_dir: Path, payload: Dict[str, Any], *, auto
             "--targets-from",
             str(scan_targets_path(session_dir)),
             "--output-dir",
-            str(output_dir(session_dir)),
+            str(run_output_dir(session_dir, "edited-file")),
             "--format",
             "json",
             *(["--automatic"] if automatic else []),
@@ -699,7 +709,7 @@ def scan_session(root: Path, session_dir: Path, payload: Dict[str, Any], *, auto
 def handle_scan_outcome(root: Path, outcome: Optional[Dict[str, Any]], payload: Dict[str, Any], *, automatic: bool) -> None:
     if not isinstance(outcome, dict):
         return
-    message = string_from_any(outcome.get("message"))
+    message = scan_message_with_selection_context(outcome)
     if not message:
         return
     status = outcome.get("status")
@@ -722,6 +732,22 @@ def handle_scan_outcome(root: Path, outcome: Optional[Dict[str, Any]], payload: 
             emit_system_message(message, payload)
         else:
             print(message)
+
+
+def scan_message_with_selection_context(outcome: Dict[str, Any]) -> str:
+    message = string_from_any(outcome.get("message"))
+    if outcome.get("status") != "needs_pack_selection":
+        return message
+    context = outcome.get("selectionContext")
+    if not isinstance(context, dict):
+        return message
+    try:
+        context_text = json.dumps(context, indent=2, sort_keys=True)
+    except Exception:
+        return message
+    if message:
+        return message + "\nselectionContext:\n" + context_text
+    return "selectionContext:\n" + context_text
 
 
 def dirty_session_dirs(root: Path) -> List[Path]:

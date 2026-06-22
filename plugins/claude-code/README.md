@@ -11,8 +11,8 @@ greprules scans fetched greprules.io packs only by default. Enable OpenGrep defa
 It uses structured CLI outputs:
 
 - `greprules agent-status --format json`
-- `.greprules/out/agent-result.json` for agent full, working-tree, and explicit-target scans
-- `.greprules/plugin-data/claude-code/sessions/<session-id>/out/agent-result.json` for edited-file plugin scans
+- `.greprules/plugin-data/claude-code/sessions/<session-id>/runs/<run-id>/agent-result.json` for plugin agent scans
+- `Full result:` in the scan summary reports the exact result file to read
 
 Skills:
 
