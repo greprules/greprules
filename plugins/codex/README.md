@@ -33,9 +33,12 @@ $greprules-scan-edited
 $greprules-scan-working-tree
 $greprules-scan-target src/auth
 $greprules-scan-full
+$greprules-submit-feedback
 ```
 
 The same skills can also be selected implicitly when the user asks Codex to set up greprules, configure greprules, or run a greprules scan.
+
+`$greprules-submit-feedback` is an explicit community contribution flow. It reviews a previous `agent-result.json`, prepares a redacted feedback bundle, previews the exact uploaded and excluded fields, and submits to greprules.io only after the user approves in conversation. It requires authenticated greprules.io access through `GREPRULES_API_KEY`.
 
 ## Automatic Hooks
 

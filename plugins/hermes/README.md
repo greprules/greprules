@@ -52,6 +52,8 @@ Aliases:
 /greprules-scan-full
 ```
 
+Hermes can also contribute scan feedback through the conversation workflow documented in the greprules skill. The agent reviews a previous `agent-result.json`, prepares a redacted feedback bundle with `greprules agent-feedback prepare`, previews uploaded and excluded fields, and runs `greprules agent-feedback submit` only after explicit user approval. Community feedback submission requires authenticated greprules.io access through `GREPRULES_API_KEY`; hooks never submit it automatically.
+
 ## Hooks
 
 - `post_tool_call` tracks files edited through Hermes file tools under `.greprules/plugin-data/hermes/sessions/<session-or-task-id>/`.

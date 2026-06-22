@@ -22,6 +22,7 @@ Skills:
 - `/greprules:scan-working-tree`: select rule packs from git changed-file context, fetch them if needed, scan git working tree, staged, and untracked files, and summarize findings
 - `/greprules:scan-target <path>`: select rule packs from explicit target context, fetch them if needed, scan files or directories, and summarize findings
 - `/greprules:scan-full`: select rule packs from repository context, fetch them if needed, scan the full repository, and summarize findings
+- `/greprules:submit-feedback`: review a previous `agent-result.json`, prepare a redacted feedback bundle, preview uploaded and excluded fields, and submit contextual feedback only after explicit user approval
 
 Automatic hooks:
 
@@ -33,3 +34,5 @@ Automatic hooks:
 - Edited-file tracking stays enabled so `/greprules:scan-edited` can still be run manually; a successful manual edited-file scan clears the tracked state.
 - Hook state is written under the project `.greprules/plugin-data/claude-code/sessions/<session-id>/` directory by default. Override the provider state root with `GREPRULES_PLUGIN_STATE_DIR` only when needed.
 - User config and caches are intentionally not removed by Claude Code plugin uninstall. Use `greprules cleanup --config --plugin-cache --dry-run` to inspect cleanup targets.
+
+Community feedback submission requires authenticated greprules.io access through `GREPRULES_API_KEY`. It is never triggered automatically by hooks.
