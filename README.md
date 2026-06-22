@@ -13,6 +13,13 @@ greprules is maintained in the greprules GitHub organization with support from P
 
 ## Quick Start
 
+### Standalone CLI
+
+```bash
+curl -fsSL https://greprules.io/install.sh | sh
+greprules scan .
+```
+
 ### Claude Code
 
 ```text
@@ -148,6 +155,22 @@ Shared files such as `.greprules/config.yaml` are not ignored automatically.
 ## Standalone CLI
 
 The CLI is useful when you want greprules.io rule packs with normal OpenGrep scan behavior.
+
+Install or update the standalone CLI:
+
+```bash
+curl -fsSL https://greprules.io/install.sh | sh
+```
+
+The installer downloads the latest GitHub Release for your platform, verifies it with `checksums.txt`, and installs `greprules` into `$HOME/.local/bin` by default.
+If the greprules.io shortcut is unavailable, use `https://raw.githubusercontent.com/greprules/greprules/main/install.sh` directly.
+
+To pin a version or install somewhere else:
+
+```bash
+curl -fsSL https://greprules.io/install.sh | GREPRULES_VERSION=v0.3.0 sh
+curl -fsSL https://greprules.io/install.sh | GREPRULES_INSTALL_DIR=/usr/local/bin sh
+```
 
 ```bash
 greprules scan .
