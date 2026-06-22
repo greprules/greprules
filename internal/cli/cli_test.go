@@ -287,13 +287,42 @@ printf '{"results":[]}\n'
 	}
 }
 
-func TestStandaloneScanPassesUnknownFlagsToOpenGrep(t *testing.T) {
-	request, _, err := standalone.ParseScanRequest([]string{"--targets-from", "targets.txt"}, standalone.ScanOptions{})
+func TestStandaloneScanParsesKnownOpenGrepValueFlagsForTargets(t *testing.T) {
+	request, _, err := standalone.ParseScanRequest([]string{"--json-output", "result.json", "--severity", "ERROR", "src"}, standalone.ScanOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(request.OpenGrepArgs, " ") != "--targets-from targets.txt" {
-		t.Fatalf("expected unknown flags to pass through to OpenGrep, got %#v", request.OpenGrepArgs)
+	if strings.Join(request.OpenGrepArgs, " ") != "--json-output result.json --severity ERROR src" {
+		t.Fatalf("unexpected OpenGrep args: %#v", request.OpenGrepArgs)
+	}
+	if strings.Join(request.RulePacks.Targets, " ") != "src" {
+		t.Fatalf("expected only src as selection target, got %#v", request.RulePacks.Targets)
+	}
+}
+
+func TestStandaloneScanRejectsUnknownOpenGrepFlagsBeforeSeparator(t *testing.T) {
+	_, _, err := standalone.ParseScanRequest([]string{"--future-flag", "src"}, standalone.ScanOptions{})
+	if err == nil {
+		t.Fatal("expected unsupported OpenGrep flag error")
+	}
+	if !strings.Contains(err.Error(), "unsupported OpenGrep flag before --: --future-flag") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestStandaloneScanSupportsRawOpenGrepPassthroughAfterSeparator(t *testing.T) {
+	request, policy, err := standalone.ParseScanRequest([]string{"--verbose", "src", "--", "--future-flag", "value"}, standalone.ScanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !policy.Verbose {
+		t.Fatal("expected greprules verbose policy")
+	}
+	if strings.Join(request.RulePacks.Targets, " ") != "src" {
+		t.Fatalf("unexpected targets: %#v", request.RulePacks.Targets)
+	}
+	if strings.Join(request.OpenGrepArgs, " ") != "src --future-flag value" {
+		t.Fatalf("unexpected OpenGrep args: %#v", request.OpenGrepArgs)
 	}
 }
 

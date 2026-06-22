@@ -32,6 +32,7 @@ type ScanRequest struct {
 	EngineMode      string
 	OpenGrepPath    string
 	OpenGrepVersion string
+	Help            bool
 }
 
 type ScanPolicy struct {
@@ -54,6 +55,10 @@ func RunScanWithOptions(ctx context.Context, args []string, options ScanOptions)
 	request, policy, err := ParseScanRequest(args, options)
 	if err != nil {
 		return err
+	}
+	if request.Help {
+		printScanUsage(options.Stdout)
+		return nil
 	}
 	ioOptions := scanIO{Quiet: options.Quiet, Stdout: options.Stdout, Stderr: options.Stderr}
 	infoMode := openGrepInfoMode(request.OpenGrepArgs)
@@ -97,7 +102,7 @@ func ParseScanRequest(args []string, options ScanOptions) (ScanRequest, ScanPoli
 	if err != nil {
 		return ScanRequest{}, ScanPolicy{}, err
 	}
-	targets := openGrepTargetCandidates(parsed.OpenGrepArgs)
+	targets := append([]string{}, parsed.Targets...)
 	root, targets, err = cmdutil.MaybePromoteSingleExternalTargetToRoot(root, targets, "", parsed.RootExplicit, parsed.Changed)
 	if err != nil {
 		return ScanRequest{}, ScanPolicy{}, err
@@ -112,6 +117,7 @@ func ParseScanRequest(args []string, options ScanOptions) (ScanRequest, ScanPoli
 		EngineMode:      options.EngineMode,
 		OpenGrepPath:    options.OpenGrepPath,
 		OpenGrepVersion: options.OpenGrepVersion,
+		Help:            parsed.Help,
 	}
 	policy := ScanPolicy{
 		AutoFetch: !parsed.NoPrepare,
@@ -127,57 +133,122 @@ type scanArgs struct {
 	Changed      bool
 	NoPrepare    bool
 	Verbose      bool
+	Help         bool
+	Targets      []string
 	OpenGrepArgs []string
 }
 
 func parseScanArgs(args []string) (scanArgs, error) {
+	mixedArgs, rawOpenGrepArgs := splitScanArgs(args)
 	parsed := scanArgs{Root: "."}
-	for index := 0; index < len(args); index++ {
-		arg := args[index]
-		if arg == "--" {
-			parsed.OpenGrepArgs = append(parsed.OpenGrepArgs, args[index+1:]...)
-			break
-		}
+	for index := 0; index < len(mixedArgs); index++ {
+		arg := mixedArgs[index]
 		switch {
 		case arg == "--root":
-			if index+1 >= len(args) {
+			if index+1 >= len(mixedArgs) {
 				return parsed, errors.New("flag needs an argument: --root")
 			}
-			parsed.Root = args[index+1]
+			parsed.Root = mixedArgs[index+1]
 			parsed.RootExplicit = true
 			index++
 		case strings.HasPrefix(arg, "--root="):
 			parsed.Root = strings.TrimPrefix(arg, "--root=")
 			parsed.RootExplicit = true
-		case arg == "--changed":
-			parsed.Changed = true
-		case strings.HasPrefix(arg, "--changed="):
-			value, err := strconv.ParseBool(strings.TrimPrefix(arg, "--changed="))
+		case arg == "--changed" || arg == "--no-prepare" || arg == "--verbose":
+			setScanBoolFlag(&parsed, strings.TrimPrefix(arg, "--"), true)
+		case strings.HasPrefix(arg, "--changed="), strings.HasPrefix(arg, "--no-prepare="), strings.HasPrefix(arg, "--verbose="):
+			name, raw, _ := strings.Cut(strings.TrimPrefix(arg, "--"), "=")
+			value, err := strconv.ParseBool(raw)
 			if err != nil {
-				return parsed, fmt.Errorf("invalid --changed value: %w", err)
+				return parsed, fmt.Errorf("invalid --%s value: %w", name, err)
 			}
-			parsed.Changed = value
-		case arg == "--no-prepare":
-			parsed.NoPrepare = true
-		case strings.HasPrefix(arg, "--no-prepare="):
-			value, err := strconv.ParseBool(strings.TrimPrefix(arg, "--no-prepare="))
+			setScanBoolFlag(&parsed, name, value)
+		case arg == "--help" || arg == "-h":
+			parsed.Help = true
+		case strings.HasPrefix(arg, "-"):
+			consumed, openGrepArgs, err := parseOpenGrepFlag(mixedArgs, index)
 			if err != nil {
-				return parsed, fmt.Errorf("invalid --no-prepare value: %w", err)
+				return parsed, err
 			}
-			parsed.NoPrepare = value
-		case arg == "--verbose":
-			parsed.Verbose = true
-		case strings.HasPrefix(arg, "--verbose="):
-			value, err := strconv.ParseBool(strings.TrimPrefix(arg, "--verbose="))
-			if err != nil {
-				return parsed, fmt.Errorf("invalid --verbose value: %w", err)
-			}
-			parsed.Verbose = value
+			parsed.OpenGrepArgs = append(parsed.OpenGrepArgs, openGrepArgs...)
+			index += consumed
 		default:
+			parsed.Targets = append(parsed.Targets, arg)
 			parsed.OpenGrepArgs = append(parsed.OpenGrepArgs, arg)
 		}
 	}
+	parsed.OpenGrepArgs = append(parsed.OpenGrepArgs, rawOpenGrepArgs...)
 	return parsed, nil
+}
+
+func parseOpenGrepFlag(args []string, index int) (int, []string, error) {
+	arg := args[index]
+	spec, known := openGrepFlagSpecFor(arg)
+	if !known {
+		return 0, nil, fmt.Errorf("unsupported OpenGrep flag before --: %s; use -- before advanced OpenGrep flags, for example: greprules scan <target> -- %s", arg, arg)
+	}
+	if !spec.Value {
+		return 0, []string{arg}, nil
+	}
+	if strings.Contains(arg, "=") || compactShortValue(arg) {
+		return 0, []string{arg}, nil
+	}
+	if index+1 >= len(args) {
+		return 0, nil, fmt.Errorf("OpenGrep flag needs an argument: %s", arg)
+	}
+	return 1, []string{arg, args[index+1]}, nil
+}
+
+func compactShortValue(arg string) bool {
+	if len(arg) <= 2 || !strings.HasPrefix(arg, "-") || strings.HasPrefix(arg, "--") {
+		return false
+	}
+	_, ok := supportedOpenGrepShortFlags[arg[:2]]
+	return ok
+}
+
+func setScanBoolFlag(parsed *scanArgs, name string, value bool) {
+	switch name {
+	case "changed":
+		parsed.Changed = value
+	case "no-prepare":
+		parsed.NoPrepare = value
+	case "verbose":
+		parsed.Verbose = value
+	}
+}
+
+func splitScanArgs(args []string) ([]string, []string) {
+	for index, arg := range args {
+		if arg == "--" {
+			return args[:index], append([]string{}, args[index+1:]...)
+		}
+	}
+	return args, nil
+}
+
+func printScanUsage(writer io.Writer) {
+	if writer == nil {
+		writer = os.Stdout
+	}
+	fmt.Fprintln(writer, `Usage:
+  greprules scan [PATH_OR_OPENGREP_ARGS...] [--root PATH] [--changed] [--verbose] [--no-prepare] [-- RAW_OPENGREP_ARGS...]
+
+greprules prepares greprules.io rule packs, then runs opengrep scan.
+
+greprules options:
+  --root PATH     project root used for detection, state, and scan working directory
+  --changed       scan git changed files from the resolved project root
+  --verbose       print greprules rule-pack selection and lock details
+  --no-prepare    skip rule-pack selection, fetching, and managed OpenGrep setup
+
+Supported OpenGrep scan options can be mixed in normal OpenGrep style:
+  greprules scan . --json --severity ERROR
+  greprules scan --json-output result.json src
+
+Other OpenGrep flags must be passed after -- so greprules does not mistake
+their values for scan targets during rule-pack selection:
+  greprules scan src -- --some-future-opengrep-flag value`)
 }
 
 func runOpenGrep(ctx context.Context, request ScanRequest, ioOptions scanIO) error {
@@ -250,8 +321,9 @@ func openGrepArgsForStandaloneScan(request ScanRequest) ([]string, error) {
 			return nil, errNoChangedFiles
 		}
 		args = append(args, changedFiles...)
+		return args, nil
 	}
-	if len(openGrepTargetCandidates(args)) == 0 {
+	if len(args) == 0 {
 		args = append(args, ".")
 	}
 	return args, nil
@@ -329,71 +401,70 @@ func hasOpenGrepConfigArg(args []string) bool {
 	return false
 }
 
-func openGrepTargetCandidates(args []string) []string {
-	targets := []string{}
-	for index := 0; index < len(args); index++ {
-		arg := args[index]
-		if arg == "--" {
-			targets = append(targets, args[index+1:]...)
-			break
-		}
-		if arg == "" {
-			continue
-		}
-		if strings.HasPrefix(arg, "--") {
-			if openGrepLongFlagConsumesValue(arg) && !strings.Contains(arg, "=") {
-				index++
-			}
-			continue
-		}
-		if strings.HasPrefix(arg, "-") {
-			if openGrepShortFlagConsumesValue(arg) && len(arg) == 2 {
-				index++
-			}
-			continue
-		}
-		targets = append(targets, arg)
+func openGrepFlagSpecFor(arg string) (openGrepFlagSpec, bool) {
+	if strings.HasPrefix(arg, "--") {
+		name, _, _ := strings.Cut(arg, "=")
+		spec, ok := supportedOpenGrepLongFlags[name]
+		return spec, ok
 	}
-	return targets
+	if strings.HasPrefix(arg, "-") {
+		name, _, _ := strings.Cut(arg, "=")
+		if spec, ok := supportedOpenGrepShortFlags[name]; ok {
+			return spec, true
+		}
+		if compactShortValue(arg) {
+			return supportedOpenGrepShortFlags[arg[:2]], true
+		}
+	}
+	return openGrepFlagSpec{}, false
 }
 
-func openGrepLongFlagConsumesValue(arg string) bool {
-	name := arg
-	if before, _, ok := strings.Cut(arg, "="); ok {
-		name = before
-	}
-	switch name {
-	case "--baseline-commit",
-		"--baseline-commit-status",
-		"--config",
-		"--dump-command-for-core",
-		"--exclude",
-		"--include",
-		"--interfile-timeout",
-		"--jobs",
-		"--lang",
-		"--max-chars-per-line",
-		"--max-lines-per-finding",
-		"--max-memory",
-		"--max-target-bytes",
-		"--optimizations",
-		"--output",
-		"--pattern",
-		"--project-root",
-		"--severity",
-		"--timeout",
-		"--timeout-threshold":
-		return true
-	default:
-		return false
-	}
+type openGrepFlagSpec struct {
+	Value bool
 }
 
-func openGrepShortFlagConsumesValue(arg string) bool {
-	switch arg {
-	case "-c", "-e", "-j", "-l", "-o":
-		return true
-	default:
-		return false
-	}
+func valueFlag() openGrepFlagSpec {
+	return openGrepFlagSpec{Value: true}
+}
+
+func boolFlag() openGrepFlagSpec {
+	return openGrepFlagSpec{}
+}
+
+// Keep this list small: these are common local scan flags whose values must not
+// be mistaken for scan targets during greprules rule-pack selection.
+var supportedOpenGrepLongFlags = map[string]openGrepFlagSpec{
+	"--baseline-commit":  valueFlag(),
+	"--config":           valueFlag(),
+	"--error":            boolFlag(),
+	"--exclude":          valueFlag(),
+	"--exclude-rule":     valueFlag(),
+	"--force-exclude":    boolFlag(),
+	"--include":          valueFlag(),
+	"--jobs":             valueFlag(),
+	"--json":             boolFlag(),
+	"--json-output":      valueFlag(),
+	"--lang":             valueFlag(),
+	"--max-target-bytes": valueFlag(),
+	"--no-git-ignore":    boolFlag(),
+	"--output":           valueFlag(),
+	"--pattern":          valueFlag(),
+	"--quiet":            boolFlag(),
+	"--sarif":            boolFlag(),
+	"--sarif-output":     valueFlag(),
+	"--severity":         valueFlag(),
+	"--strict":           boolFlag(),
+	"--text":             boolFlag(),
+	"--text-output":      valueFlag(),
+	"--timeout":          valueFlag(),
+}
+
+var supportedOpenGrepShortFlags = map[string]openGrepFlagSpec{
+	"-c": valueFlag(),
+	"-e": valueFlag(),
+	"-f": valueFlag(),
+	"-j": valueFlag(),
+	"-l": valueFlag(),
+	"-o": valueFlag(),
+	"-q": boolFlag(),
 }

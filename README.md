@@ -153,7 +153,7 @@ The CLI is useful when you want greprules.io rule packs with normal OpenGrep sca
 greprules scan .
 ```
 
-On first run, `scan` detects the target language/framework context, selects matching greprules.io rule packs, fetches and pins them in user state, installs managed OpenGrep when needed, and then runs `opengrep scan` with the selected rule packs injected as `--config` arguments. Existing project locks are reused so pinned rule packs stay reproducible on the same machine. OpenGrep arguments pass through unchanged.
+On first run, `scan` detects the target language/framework context, selects matching greprules.io rule packs, fetches and pins them in user state, installs managed OpenGrep when needed, and then runs `opengrep scan` with the selected rule packs injected as `--config` arguments. Existing project locks are reused so pinned rule packs stay reproducible on the same machine. Supported OpenGrep scan options can be mixed in normal OpenGrep style. Put advanced OpenGrep flags after `--` so greprules does not mistake their values for pack-selection targets.
 
 More commands:
 
@@ -165,8 +165,10 @@ greprules scan path/to/file
 greprules scan . --json
 greprules scan . --sarif --output result.sarif
 greprules scan . --severity ERROR
+greprules scan --json-output result.json src
 greprules scan . --no-prepare
 greprules scan . --verbose
+greprules scan src -- --some-future-opengrep-flag value
 greprules cleanup --plugin-cache --dry-run
 ```
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 
-GREPRULES_VERSION="${GREPRULES_VERSION:-v0.2.5}"
+GREPRULES_VERSION="${GREPRULES_VERSION:-v0.3.0}"
 GREPRULES_REPO="${GREPRULES_REPO:-greprules/greprules}"
 SELF_PATH="${BASH_SOURCE[0]}"
 SELF_DIR="$(CDPATH= cd -- "$(dirname -- "$SELF_PATH")" && pwd)"
