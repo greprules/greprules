@@ -127,6 +127,14 @@ func (c Client) CreateFindingFeedback(ctx context.Context, apiKey string, ruleSl
 }
 
 func (c Client) postJSON(ctx context.Context, endpoint string, apiKey string, requestBody any, target any) error {
+	return c.doJSON(ctx, http.MethodPost, endpoint, apiKey, requestBody, target)
+}
+
+func (c Client) putJSON(ctx context.Context, endpoint string, apiKey string, requestBody any, target any) error {
+	return c.doJSON(ctx, http.MethodPut, endpoint, apiKey, requestBody, target)
+}
+
+func (c Client) doJSON(ctx context.Context, method string, endpoint string, apiKey string, requestBody any, target any) error {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
 		return fmt.Errorf("greprules API key is required")
@@ -139,7 +147,7 @@ func (c Client) postJSON(ctx context.Context, endpoint string, apiKey string, re
 	if client == nil {
 		client = http.DefaultClient
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.ResolveURL(endpoint), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, method, c.ResolveURL(endpoint), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -153,7 +161,7 @@ func (c Client) postJSON(ctx context.Context, endpoint string, apiKey string, re
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		limited, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("POST %s failed: %s: %s", req.URL.String(), resp.Status, strings.TrimSpace(string(limited)))
+		return fmt.Errorf("%s %s failed: %s: %s", method, req.URL.String(), resp.Status, strings.TrimSpace(string(limited)))
 	}
 	return json.NewDecoder(resp.Body).Decode(target)
 }

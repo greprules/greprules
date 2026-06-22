@@ -74,6 +74,6 @@ func (c Client) CreateRule(ctx context.Context, apiKey string, request RuleUploa
 
 func (c Client) UpdateRule(ctx context.Context, apiKey string, slug string, request RuleUploadRequest) (RuleUploadResponse, error) {
 	var response RuleUploadResponse
-	err := c.postJSON(ctx, "/api/me/rules/"+url.PathEscape(slug), apiKey, request, &response)
+	err := c.putJSON(ctx, "/api/me/rules/"+url.PathEscape(slug), apiKey, request, &response)
 	return response, err
 }

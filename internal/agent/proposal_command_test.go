@@ -113,6 +113,34 @@ func TestProposalSubmitPostsAgentGeneratedRule(t *testing.T) {
 	}
 }
 
+func TestRuleUpdateUsesAuthenticatedPut(t *testing.T) {
+	var sawPut bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/me/rules/agent-sql-injection" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method != http.MethodPut {
+			t.Fatalf("method = %s, want PUT", r.Method)
+		}
+		if r.Header.Get("authorization") != "Bearer test-key" {
+			t.Fatalf("missing bearer token")
+		}
+		sawPut = true
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"rule":{"slug":"agent-sql-injection","validation_status":"queued"},"version":{"version":"1.0.1","validation_status":"queued"},"validation":{"status":"queued"}}`))
+	}))
+	defer server.Close()
+
+	client := rules.NewRegistry(server.URL)
+	if _, err := client.UpdateRule(context.Background(), "test-key", "agent-sql-injection", completedRuleProposalBundle().Proposal); err != nil {
+		t.Fatal(err)
+	}
+	if !sawPut {
+		t.Fatal("expected authenticated PUT request")
+	}
+}
+
 func completedRuleProposalBundle() RuleProposalBundle {
 	bundle := NewRuleProposalTemplate("Agent SQL injection rule", "agent.sql-injection", "python", "MIT")
 	bundle.Proposal.Description = "Detects direct string formatting in SQL execution calls."

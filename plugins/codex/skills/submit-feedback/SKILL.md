@@ -36,4 +36,4 @@ Rules:
 - Never upload raw source code, raw file paths, private repository URLs, or code snippets.
 - If `GREPRULES_API_KEY` is missing, stop and tell the user that authenticated greprules.io contribution requires a login/API key.
 - False-positive feedback means "false positive in this context", not a global rule downvote.
-- Do not create rule proposals in this skill; use the future rule-proposal flow when available.
+- Do not create rule proposals in this skill; use `$greprules-propose-rule` for agent-generated rule proposals.
