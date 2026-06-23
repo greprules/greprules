@@ -53,7 +53,7 @@ Aliases:
 /greprules-scan-full
 ```
 
-Hermes can also contribute scan feedback and agent-generated rule proposals through the conversation workflow documented in the greprules skill. The agent prepares a redacted feedback bundle with `greprules agent-feedback prepare` or a rule proposal bundle with `greprules agent-proposal prepare`, previews uploaded and excluded fields, and runs the matching submit command only after explicit user approval. Community contribution requires browser-approved greprules.io CLI login from `greprules auth login`; hooks never submit it automatically.
+Hermes can also contribute scan feedback and agent-generated rule proposals through the conversation workflow documented in the greprules skill. The agent prepares a redacted feedback bundle with `greprules agent-feedback prepare` or a rule proposal bundle with `greprules agent-proposal prepare`, previews uploaded and excluded fields, and runs the matching submit command only after explicit user approval. Community contribution requires browser-approved greprules.io CLI login; if login is missing, Hermes should start the chat login flow with `greprules auth login --agent` or fallback to `greprules auth login --no-browser`, show the approval URL/code, and wait for approval. Hooks never submit contributions automatically.
 
 ## Hooks
 

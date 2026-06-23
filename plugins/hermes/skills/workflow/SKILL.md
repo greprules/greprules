@@ -25,6 +25,21 @@ The `pre_llm_call` hook can inject compact edited-file scan results before the n
 
 Hermes edited-file state is stored under `.greprules/plugin-data/hermes/sessions/<session-or-task-id>/`. The adapter passes only explicit target files to the CLI. If multiple Hermes sessions have dirty files, do not merge them; use the current session flow or `/greprules scan-target <path>` for explicit files.
 
+greprules.io login:
+
+Use this flow when the user asks Hermes to log in to greprules, connect greprules.io, authorize community contribution, or fix a greprules login-required error. This flow only authenticates the local greprules CLI. It must not submit scan feedback, rule proposals, source code, findings, or diagnostics.
+
+1. Run `greprules auth status`.
+2. If status succeeds, report that greprules is logged in and stop.
+3. If status reports missing or expired login, start the browser approval flow yourself:
+   - Prefer `greprules auth login --agent`.
+   - If the installed CLI does not recognize `--agent`, retry with `greprules auth login --no-browser`.
+4. As soon as the command prints an approval URL or JSON event with `event=approval_required`, show the user the approval URL, the short code if present, and tell them to approve it in the browser.
+5. Keep the login command running while the user approves. Do not wait silently until the command exits before showing the URL.
+6. When the command reports login success, rerun `greprules auth status` and summarize the logged-in registry and expiry if shown.
+
+Do not ask the user to paste tokens, API keys, cookies, or browser session data into chat. Do not print or inspect the stored token file. If approval expires, rerun the login command and show only the newest URL/code.
+
 Community feedback contribution:
 
 Use this flow only when the user explicitly asks Hermes to contribute greprules scan feedback, report true positives or false positives to greprules.io, or share scan warnings/diagnostics. This flow is never automatic and must not run from hooks without a user approval turn.
@@ -36,8 +51,9 @@ Use this flow only when the user explicitly asks Hermes to contribute greprules 
 5. Add entries to the bundle `feedback` array only for findings the user wants to submit.
 6. Show a concise preview covering feedback verdicts, diagnostics, uploaded fields, and excluded fields. Uploaded fields are rule slug, rule version, finding fingerprint, verdict, short message, and diagnostic hashes. Excluded fields are source code, raw file paths, private repository URLs, and code snippets.
 7. Ask for explicit natural-language approval. If the user approves only a subset, update the bundle and show the revised scope.
-8. After approval, run `greprules agent-feedback submit --bundle <feedback-bundle.json> --consent-session <short-session-id>`.
-9. If submit reports that greprules login is required, stop and tell the user to run `greprules auth login` so the browser can approve contribution access.
+8. After approval, run `greprules auth status`. If login is missing or expired, run the greprules.io login flow above from chat.
+9. Run `greprules agent-feedback submit --bundle <feedback-bundle.json> --consent-session <short-session-id>`.
+10. If submit reports that greprules login is required, run the same chat login flow and then retry submit only if the user's contribution approval still covers the exact bundle.
 
 False-positive feedback is context-specific precision feedback. Do not describe it as a global rule downvote or direct quality-score penalty.
 
@@ -51,5 +67,6 @@ Use this flow only when the user explicitly asks Hermes to turn an independently
 4. Verify the bundle contains no TODO placeholders and no private repository URLs, raw local file paths, organization secrets, or unapproved source snippets.
 5. Preview uploaded fields and excluded fields for the user.
 6. Ask for explicit natural-language approval. If scope changes, update the bundle and preview again.
-7. After approval, run `greprules agent-proposal submit --bundle <rule-proposal-bundle.json> --consent-session <short-session-id>`.
-8. If submit reports that greprules login is required, stop and tell the user to run `greprules auth login` so the browser can approve contribution access.
+7. After approval, run `greprules auth status`. If login is missing or expired, run the greprules.io login flow above from chat.
+8. Run `greprules agent-proposal submit --bundle <rule-proposal-bundle.json> --consent-session <short-session-id>`.
+9. If submit reports that greprules login is required, run the same chat login flow and then retry submit only if the user's proposal approval still covers the exact bundle.

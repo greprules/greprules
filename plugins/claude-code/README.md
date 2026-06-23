@@ -22,6 +22,7 @@ Skills:
 - `/greprules:scan-working-tree`: select rule packs from git changed-file context, fetch them if needed, scan git working tree, staged, and untracked files, and summarize findings
 - `/greprules:scan-target <path>`: select rule packs from explicit target context, fetch them if needed, scan files or directories, and summarize findings
 - `/greprules:scan-full`: select rule packs from repository context, fetch them if needed, scan the full repository, and summarize findings
+- `/greprules:auth-login`: sign the local greprules CLI in to greprules.io from the Claude Code conversation by showing the browser approval URL/code and waiting for approval
 - `/greprules:submit-feedback`: review a previous `agent-result.json`, prepare a redacted feedback bundle, preview uploaded and excluded fields, and submit contextual feedback only after explicit user approval
 - `/greprules:propose-rule`: prepare an agent-generated rule proposal bundle with provenance and public tests, preview uploaded and excluded fields, and submit only after explicit user approval
 
@@ -36,4 +37,4 @@ Automatic hooks:
 - Hook state is written under the project `.greprules/plugin-data/claude-code/sessions/<session-id>/` directory by default. Override the provider state root with `GREPRULES_PLUGIN_STATE_DIR` only when needed.
 - User config and caches are intentionally not removed by Claude Code plugin uninstall. Use `greprules cleanup --config --plugin-cache --dry-run` to inspect cleanup targets.
 
-Community feedback and rule proposal submission require browser-approved greprules.io CLI login from `greprules auth login`. They are never triggered automatically by hooks.
+Community feedback and rule proposal submission require browser-approved greprules.io CLI login. If login is missing, Claude Code should use `/greprules:auth-login` from chat instead of sending the user to a separate terminal command. Contributions are never triggered automatically by hooks.

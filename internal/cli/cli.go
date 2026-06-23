@@ -57,7 +57,7 @@ func printUsage() {
 
 Usage:
   greprules fetch <PACK> [PACK...]
-  greprules auth login|status|logout
+  greprules auth login|status|logout [--agent]
   greprules setup-opengrep [VERSION] [--force]
   greprules scan [PATH_OR_OPENGREP_ARGS...] [--root PATH] [--changed] [--verbose] [--no-prepare] [-- RAW_OPENGREP_ARGS...]
   greprules cleanup [--config|--cache|--opengrep|--plugin-cache|--repo|--all] [--dry-run]`)

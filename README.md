@@ -152,7 +152,7 @@ If the greprules.io shortcut is unavailable, use `https://raw.githubusercontent.
 To pin a version or install somewhere else:
 
 ```bash
-curl -fsSL https://greprules.io/install.sh | GREPRULES_VERSION=v0.5.0 sh
+curl -fsSL https://greprules.io/install.sh | GREPRULES_VERSION=v0.5.1 sh
 curl -fsSL https://greprules.io/install.sh | GREPRULES_INSTALL_DIR=/usr/local/bin sh
 ```
 
@@ -183,7 +183,7 @@ greprules auth status
 greprules cleanup --plugin-cache --dry-run
 ```
 
-Community feedback and rule proposal submission use browser-approved greprules.io CLI login. Run `greprules auth login` once; the browser signs in to greprules.io and approves a local CLI token stored in user state.
+Community feedback and rule proposal submission use browser-approved greprules.io CLI login. Run `greprules auth login` once; the browser signs in to greprules.io and approves a local CLI token stored in user state. Agent plugins should use `greprules auth login --agent` for chat-driven login so they can show the approval URL/code without asking the user to switch to a terminal.
 
 ## Advanced Agent Configuration Reference
 

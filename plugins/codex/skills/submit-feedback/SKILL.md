@@ -12,7 +12,7 @@ This skill is never automatic. Do not run it from hooks, and do not submit anyth
 Prerequisites:
 
 - A previous greprules scan result path, usually the `Full result:` path printed by `$greprules-scan-edited`, `$greprules-scan-working-tree`, `$greprules-scan-target`, or `$greprules-scan-full`.
-- Browser-approved greprules.io CLI login from `greprules auth login`.
+- Browser-approved greprules.io CLI login. If it is missing or expired, run the `$greprules-auth-login` flow from chat instead of asking the user to run a terminal command.
 
 Workflow:
 
@@ -27,13 +27,14 @@ Workflow:
    - uploaded information: rule slug, rule version, finding fingerprint, verdict, short message, scan diagnostic hashes
    - not uploaded: source code, raw file paths, private repository URL, code snippets
 8. Ask for explicit approval. Accept natural-language approvals such as "submit these", "only submit the false positives", or "exclude that item". If the user changes the scope, update the bundle and show the revised scope before submitting.
-9. After approval, run `greprules agent-feedback submit --bundle <feedback-bundle.json> --consent-session <short-session-id>`.
-10. Report the scan id, number of findings/diagnostics submitted, and number of feedback verdicts submitted.
+9. After approval, run `greprules auth status`. If login is missing or expired, run `greprules auth login --agent`, immediately show the approval URL/code to the user, wait for approval, and rerun `greprules auth status`. If the installed CLI does not recognize `--agent`, retry with `greprules auth login --no-browser`.
+10. Run `greprules agent-feedback submit --bundle <feedback-bundle.json> --consent-session <short-session-id>`.
+11. Report the scan id, number of findings/diagnostics submitted, and number of feedback verdicts submitted.
 
 Rules:
 
 - Never submit feedback from automatic hook output without a user approval turn.
 - Never upload raw source code, raw file paths, private repository URLs, or code snippets.
-- If submit reports that greprules login is required, stop and tell the user to run `greprules auth login` so the browser can approve contribution access.
+- If submit reports that greprules login is required, run the same chat login flow and then retry submit only if the user's contribution approval still covers the exact bundle.
 - False-positive feedback means "false positive in this context", not a global rule downvote.
 - Do not create rule proposals in this skill; use `$greprules-propose-rule` for agent-generated rule proposals.

@@ -33,15 +33,18 @@ $greprules-scan-edited
 $greprules-scan-working-tree
 $greprules-scan-target src/auth
 $greprules-scan-full
+$greprules-auth-login
 $greprules-submit-feedback
 $greprules-propose-rule
 ```
 
-The same skills can also be selected implicitly when the user asks Codex to set up greprules, configure greprules, or run a greprules scan.
+The same skills can also be selected implicitly when the user asks Codex to set up greprules, configure greprules, log in to greprules.io, or run a greprules scan.
 
-`$greprules-submit-feedback` is an explicit community contribution flow. It reviews a previous `agent-result.json`, prepares a redacted feedback bundle, previews the exact uploaded and excluded fields, and submits to greprules.io only after the user approves in conversation. It requires browser-approved greprules.io CLI login from `greprules auth login`.
+`$greprules-auth-login` signs the local greprules CLI in to greprules.io from the Codex conversation by showing the browser approval URL/code and waiting for approval. It does not upload feedback, proposals, source, or scan data.
 
-`$greprules-propose-rule` is an explicit rule proposal flow. It prepares an agent-generated rule proposal bundle, requires license/provenance/generated metadata plus positive and negative public tests, previews uploaded and excluded fields, and submits only after user approval. It requires browser-approved greprules.io CLI login from `greprules auth login`.
+`$greprules-submit-feedback` is an explicit community contribution flow. It reviews a previous `agent-result.json`, prepares a redacted feedback bundle, previews the exact uploaded and excluded fields, and submits to greprules.io only after the user approves in conversation. If browser-approved greprules.io CLI login is missing, Codex should run the chat login flow instead of sending the user to a separate terminal command.
+
+`$greprules-propose-rule` is an explicit rule proposal flow. It prepares an agent-generated rule proposal bundle, requires license/provenance/generated metadata plus positive and negative public tests, previews uploaded and excluded fields, and submits only after user approval. If browser-approved greprules.io CLI login is missing, Codex should run the chat login flow instead of sending the user to a separate terminal command.
 
 ## Automatic Hooks
 

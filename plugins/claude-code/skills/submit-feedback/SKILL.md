@@ -9,7 +9,7 @@ This is an explicit contribution workflow, not an automatic scan workflow. Never
 Prerequisites:
 
 - A previous greprules `agent-result.json` path. Prefer the `Full result:` path printed by `/greprules:scan-edited`, `/greprules:scan-working-tree`, `/greprules:scan-target`, or `/greprules:scan-full`.
-- Browser-approved greprules.io CLI login from `greprules auth login`.
+- Browser-approved greprules.io CLI login. If it is missing or expired, run the `/greprules:auth-login` flow from chat instead of asking the user to run a terminal command.
 
 Workflow:
 
@@ -25,13 +25,14 @@ Workflow:
    - uploaded fields: rule slug, rule version, finding fingerprint, verdict, short message, diagnostic hashes
    - excluded fields: source code, raw file paths, private repository URL, code snippets
 8. Ask for explicit approval. If the user approves only a subset, update the bundle and preview the revised scope.
-9. After approval, run `greprules agent-feedback submit --bundle <feedback-bundle.json> --consent-session <short-session-id>`.
-10. Report the scan id, diagnostics count, and feedback verdict count.
+9. After approval, run `greprules auth status`. If login is missing or expired, run `greprules auth login --agent`, immediately show the approval URL/code to the user, wait for approval, and rerun `greprules auth status`. If the installed CLI does not recognize `--agent`, retry with `greprules auth login --no-browser`.
+10. Run `greprules agent-feedback submit --bundle <feedback-bundle.json> --consent-session <short-session-id>`.
+11. Report the scan id, diagnostics count, and feedback verdict count.
 
 Rules:
 
 - No automatic contribution upload.
 - No raw source code, raw file paths, private repository URLs, or code snippets.
-- If submit reports that greprules login is required, stop and tell the user to run `greprules auth login` so the browser can approve contribution access.
+- If submit reports that greprules login is required, run the same chat login flow and then retry submit only if the user's contribution approval still covers the exact bundle.
 - Treat false positives as context-specific precision feedback, not a global rule rating penalty.
 - Do not create or upload rule proposals in this skill.

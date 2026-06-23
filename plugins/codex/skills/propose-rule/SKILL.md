@@ -9,7 +9,7 @@ Use this skill when the user asks Codex to turn an independently identified vuln
 
 ## Requirements
 
-- Browser-approved greprules.io CLI login from `greprules auth login`.
+- Browser-approved greprules.io CLI login. If it is missing or expired, run the `$greprules-auth-login` flow from chat instead of asking the user to run a terminal command.
 - A user-approved vulnerability explanation and a proposed OpenGrep/Semgrep-compatible YAML rule.
 - At least one positive and one negative public test fixture.
 
@@ -23,8 +23,9 @@ Use this skill when the user asks Codex to turn an independently identified vuln
    - uploaded information: rule YAML, license, provenance, generated_by/generated_at, public test fixtures, source context, consent metadata
    - not uploaded: private repository URLs, raw local file paths, organization secrets, unrelated source code
 6. Ask for explicit natural-language approval. If the user changes scope, update the bundle and preview again.
-7. After approval, run `greprules agent-proposal submit --bundle <rule-proposal-bundle.json> --consent-session <short-session-id>`.
-8. If submit reports that greprules login is required, stop and tell the user to run `greprules auth login` so the browser can approve contribution access.
+7. After approval, run `greprules auth status`. If login is missing or expired, run `greprules auth login --agent`, immediately show the approval URL/code to the user, wait for approval, and rerun `greprules auth status`. If the installed CLI does not recognize `--agent`, retry with `greprules auth login --no-browser`.
+8. Run `greprules agent-proposal submit --bundle <rule-proposal-bundle.json> --consent-session <short-session-id>`.
+9. If submit reports that greprules login is required, run the same chat login flow and then retry submit only if the user's proposal approval still covers the exact bundle.
 
 ## Guardrails
 

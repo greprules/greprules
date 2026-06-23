@@ -137,13 +137,20 @@ func runLogin(ctx context.Context, args []string) error {
 	registryFlag := fs.String("registry", "", "greprules registry URL")
 	clientName := fs.String("client-name", "greprules CLI", "client name shown in the browser approval")
 	noBrowser := fs.Bool("no-browser", false, "print the approval URL without opening a browser")
+	agentMode := fs.Bool("agent", false, "emit machine-readable login events for coding agents")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return errors.New("usage: greprules auth login [--registry URL] [--no-browser]")
+		return errors.New("usage: greprules auth login [--registry URL] [--no-browser] [--agent]")
 	}
 	registry := ResolveRegistry(*registryFlag)
+	if *agentMode {
+		*noBrowser = true
+		if strings.TrimSpace(*clientName) == "greprules CLI" {
+			*clientName = "greprules agent"
+		}
+	}
 	var start startResponse
 	if _, err := postJSON(ctx, registry, "/api/cli-auth/start", map[string]string{
 		"client_name": strings.TrimSpace(*clientName),
@@ -156,14 +163,35 @@ func runLogin(ctx context.Context, args []string) error {
 	if start.ExpiresIn <= 0 {
 		start.ExpiresIn = 600
 	}
-	fmt.Printf("Open this URL to authorize greprules CLI:\n%s\n", start.VerificationURIComplete)
-	fmt.Printf("Code: %s\n", start.UserCode)
+	if *agentMode {
+		if err := emitAgentEvent("approval_required", map[string]any{
+			"registry":                  registry,
+			"user_code":                 start.UserCode,
+			"verification_uri":          start.VerificationURI,
+			"verification_uri_complete": start.VerificationURIComplete,
+			"expires_in":                start.ExpiresIn,
+			"interval":                  start.Interval,
+		}); err != nil {
+			return err
+		}
+	} else {
+		fmt.Printf("Open this URL to authorize greprules CLI:\n%s\n", start.VerificationURIComplete)
+		fmt.Printf("Code: %s\n", start.UserCode)
+	}
 	if !*noBrowser {
 		if err := openBrowser(start.VerificationURIComplete); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not open browser automatically: %v\n", err)
 		}
 	}
-	fmt.Println("Waiting for browser approval...")
+	if *agentMode {
+		if err := emitAgentEvent("waiting_for_approval", map[string]any{
+			"registry": registry,
+		}); err != nil {
+			return err
+		}
+	} else {
+		fmt.Println("Waiting for browser approval...")
+	}
 
 	deadline := time.Now().Add(time.Duration(start.ExpiresIn) * time.Second)
 	for {
@@ -197,12 +225,31 @@ func runLogin(ctx context.Context, args []string) error {
 		if err := StoreToken(registry, poll.Token, poll.ExpiresAt); err != nil {
 			return err
 		}
-		fmt.Printf("Logged in to %s\n", registry)
-		if poll.ExpiresAt != "" {
-			fmt.Printf("Token expires at %s\n", poll.ExpiresAt)
+		if *agentMode {
+			payload := map[string]any{
+				"registry": registry,
+			}
+			if poll.ExpiresAt != "" {
+				payload["expires_at"] = poll.ExpiresAt
+			}
+			return emitAgentEvent("logged_in", payload)
+		} else {
+			fmt.Printf("Logged in to %s\n", registry)
+			if poll.ExpiresAt != "" {
+				fmt.Printf("Token expires at %s\n", poll.ExpiresAt)
+			}
 		}
 		return nil
 	}
+}
+
+func emitAgentEvent(event string, payload map[string]any) error {
+	if payload == nil {
+		payload = map[string]any{}
+	}
+	payload["event"] = event
+	encoder := json.NewEncoder(os.Stdout)
+	return encoder.Encode(payload)
 }
 
 func runStatus(args []string) error {
