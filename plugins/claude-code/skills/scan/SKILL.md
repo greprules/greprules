@@ -38,7 +38,7 @@ Community feedback flow:
 1. Use a previous `Full result:` path from the scan output. If no result path is clear, ask for the `agent-result.json` path.
 2. Run `greprules agent-feedback prepare --result <agent-result.json> --out <feedback-bundle.json>`.
 3. Read the generated bundle and verify it contains hashed project/finding identifiers, not raw source code or raw file paths.
-4. Add entries to the bundle `feedback` array only for items the user wants to submit. Each entry must use the bundle finding's `rule_slug`, `rule_version`, and `finding_fingerprint`.
+4. Add entries to the bundle `feedback` array only for findings still present in the prepared bundle. Each entry must use that bundle finding's `rule_slug`, `rule_version`, and `finding_fingerprint`. Do not add feedback for findings omitted by `prepare`; OpenGrep default-rule findings are not greprules.io registry rules.
 5. Preview the exact submission scope:
    - uploaded: rule slug, rule version, finding fingerprint, verdict, short message, and scan diagnostic hashes
    - not uploaded: source code, raw file paths, private repository URL, or code snippets

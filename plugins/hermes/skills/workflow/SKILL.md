@@ -44,7 +44,7 @@ After a manual scan/review, if the findings include justified true-positive, fal
 2. Review findings, warnings, and errors locally. Classify only findings you can justify as `true_positive`, `false_positive`, `accepted_risk`, `not_applicable`, or `fixed`.
 3. Run `greprules agent-feedback prepare --result <agent-result.json> --out <feedback-bundle.json>`.
 4. Read the generated bundle and verify it contains hashed project/finding identifiers, not raw source code or raw file paths.
-5. Add entries to the bundle `feedback` array only for findings the user wants to submit.
+5. Add entries to the bundle `feedback` array only for findings still present in the prepared bundle. Do not add feedback for findings omitted by `prepare`; OpenGrep default-rule findings are not greprules.io registry rules.
 6. Show a concise preview covering feedback verdicts, diagnostics, uploaded fields, and excluded fields. Uploaded fields are rule slug, rule version, finding fingerprint, verdict, short message, and diagnostic hashes. Excluded fields are source code, raw file paths, private repository URLs, and code snippets.
 7. Ask for explicit natural-language approval. If the user approves only a subset, update the bundle and show the revised scope.
 8. After approval, run `greprules auth status`. If login is missing or expired, run the greprules.io login flow above from chat.

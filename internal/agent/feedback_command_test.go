@@ -45,9 +45,18 @@ func TestFeedbackPrepareBuildsRedactedBundle(t *testing.T) {
 	if got, want := len(bundle.Findings), 1; got != want {
 		t.Fatalf("findings count = %d, want %d", got, want)
 	}
+	if got, want := bundle.OmittedFindings, 1; got != want {
+		t.Fatalf("omitted findings count = %d, want %d", got, want)
+	}
+	if strings.Contains(text, "python.lang.security.audit.subprocess-shell-true") || strings.Contains(text, "opengrep default finding") {
+		t.Fatalf("bundle included non-registry OpenGrep finding context: %s", text)
+	}
 	finding := bundle.Findings[0]
 	if finding.RuleSlug != "python-sql-injection" {
 		t.Fatalf("unexpected rule slug: %s", finding.RuleSlug)
+	}
+	if !strings.Contains(finding.OpenGrepRuleID, ".python-sql-injection") {
+		t.Fatalf("expected path-prefixed OpenGrep rule id to be preserved, got %s", finding.OpenGrepRuleID)
 	}
 	if !strings.HasPrefix(finding.PathHash, "sha256:") || !strings.HasPrefix(finding.MessageHash, "sha256:") {
 		t.Fatalf("expected sha256 hashes, got path=%s message=%s", finding.PathHash, finding.MessageHash)
@@ -145,6 +154,130 @@ func TestFeedbackSubmitPostsScanDiagnosticsAndFindingFeedback(t *testing.T) {
 	}
 }
 
+func TestFeedbackSubmitRejectsNonRegistryFeedbackBeforeNetwork(t *testing.T) {
+	root, resultPath := writeFeedbackTestResult(t)
+	bundle, err := BuildFeedbackBundle(resultPath, "vtest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundle.Feedback = []PreparedFindingFeedback{{
+		RuleSlug:           "python-lang-security-audit-subprocess-shell-true",
+		RuleVersion:        "unknown",
+		FindingFingerprint: "sha256:not-eligible",
+		Verdict:            "false_positive",
+	}}
+	bundlePath := filepath.Join(root, "feedback-bundle.json")
+	if err := writeJSONFile(bundlePath, bundle); err != nil {
+		t.Fatal(err)
+	}
+
+	err = RunFeedbackCommand(context.Background(), []string{
+		"submit",
+		"--bundle", bundlePath,
+		"--consent-session", "session-123456",
+		"--registry", "https://example.test",
+	}, "vtest")
+	if err == nil {
+		t.Fatal("expected non-registry feedback reference to be rejected")
+	}
+	if !strings.Contains(err.Error(), "not eligible for greprules registry feedback") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFeedbackSubmitRejectsLegacyUnknownVersionFeedbackBeforeNetwork(t *testing.T) {
+	root, resultPath := writeFeedbackTestResult(t)
+	bundle, err := BuildFeedbackBundle(resultPath, "vtest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyFinding := rules.ScanFindingContribution{
+		RuleSlug:           "python-lang-security-audit-subprocess-shell-true",
+		OpenGrepRuleID:     "python.lang.security.audit.subprocess-shell-true",
+		RuleVersion:        "unknown",
+		FindingFingerprint: "sha256:legacy-default-rule",
+		PathHash:           "sha256:path",
+		MessageHash:        "sha256:message",
+		Metadata:           map[string]any{},
+	}
+	bundle.Findings = append(bundle.Findings, legacyFinding)
+	bundle.Feedback = []PreparedFindingFeedback{{
+		RuleSlug:           legacyFinding.RuleSlug,
+		RuleVersion:        legacyFinding.RuleVersion,
+		FindingFingerprint: legacyFinding.FindingFingerprint,
+		Verdict:            "false_positive",
+	}}
+	bundlePath := filepath.Join(root, "feedback-bundle.json")
+	if err := writeJSONFile(bundlePath, bundle); err != nil {
+		t.Fatal(err)
+	}
+
+	err = RunFeedbackCommand(context.Background(), []string{
+		"submit",
+		"--bundle", bundlePath,
+		"--consent-session", "session-123456",
+		"--registry", "https://example.test",
+	}, "vtest")
+	if err == nil {
+		t.Fatal("expected legacy unknown-version feedback reference to be rejected")
+	}
+	if !strings.Contains(err.Error(), "without a registry rule version") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLookupManifestRuleRefMatchesPathPrefixedOpenGrepRuleID(t *testing.T) {
+	refs := newManifestRuleRefIndex()
+	addManifestRuleRefKey(refs.Suffix, "sql-injection", manifestRuleRef{Slug: "too-short", Version: "1.0.0"})
+	addManifestRuleRefKey(refs.Suffix, "python-sql-injection", manifestRuleRef{Slug: "python-sql-injection", Version: "1.0.0"})
+
+	ref := lookupManifestRuleRef(refs, "Users.l0ch.Library.Caches.greprules.packs.python-security.sha.contents.rules.python-sql-injection")
+	if ref.Slug != "python-sql-injection" {
+		t.Fatalf("unexpected ref: %#v", ref)
+	}
+
+	nonBoundaryRefs := newManifestRuleRefIndex()
+	addManifestRuleRefKey(nonBoundaryRefs.Suffix, "python-sql-injection", manifestRuleRef{Slug: "python-sql-injection", Version: "1.0.0"})
+	if ref := lookupManifestRuleRef(nonBoundaryRefs, "some-prefix-python-sql-injection"); ref.Slug != "" {
+		t.Fatalf("expected non-boundary suffix to be rejected, got %#v", ref)
+	}
+}
+
+func TestLookupManifestRuleRefRejectsRawRuleID(t *testing.T) {
+	refs := newManifestRuleRefIndex()
+	addTestManifestRuleRef(refs, rules.ManifestRule{
+		Slug:            "rule-a",
+		RuleID:          "shared.raw-id",
+		OriginalRuleID:  "shared.raw-id",
+		OpenGrepRuleIDs: []string{"rule-a"},
+	}, "1.0.0")
+	addTestManifestRuleRef(refs, rules.ManifestRule{
+		Slug:            "rule-b",
+		RuleID:          "shared.raw-id",
+		OriginalRuleID:  "shared.raw-id",
+		OpenGrepRuleIDs: []string{"rule-b"},
+	}, "1.0.0")
+
+	if ref := lookupManifestRuleRef(refs, "shared.raw-id"); ref.Slug != "" {
+		t.Fatalf("expected raw rule id to be rejected, got %#v", ref)
+	}
+	if ref := lookupManifestRuleRef(refs, "Users.l0ch.Library.Caches.greprules.packs.shared.contents.rules.shared.raw-id"); ref.Slug != "" {
+		t.Fatalf("expected path-prefixed raw rule id to be rejected, got %#v", ref)
+	}
+	ref := lookupManifestRuleRef(refs, "Users.l0ch.Library.Caches.greprules.packs.shared.contents.rules.rule-b")
+	if ref.Slug != "rule-b" {
+		t.Fatalf("expected slug rule id to resolve, got %#v", ref)
+	}
+}
+
+func addTestManifestRuleRef(refs manifestRuleRefIndex, rule rules.ManifestRule, version string) {
+	ref := manifestRuleRef{Slug: rule.Slug, RuleID: rule.RuleID, Version: version}
+	for _, key := range manifestRuleLookupKeys(rule) {
+		addManifestRuleRefKey(refs.Exact, key, ref)
+		addManifestRuleRefKey(refs.Suffix, key, ref)
+	}
+}
+
 func writeFeedbackTestResult(t *testing.T) (string, string) {
 	t.Helper()
 	root := t.TempDir()
@@ -164,7 +297,7 @@ func writeFeedbackTestResult(t *testing.T) (string, string) {
     "slug": "python-sql-injection",
     "title": "Python SQL Injection",
     "rule_id": "python.sql-injection",
-    "canonical_rule_ids": ["python.sql-injection"],
+    "opengrep_rule_ids": ["python-sql-injection"],
     "original_rule_id": "python.sql-injection",
     "rule_namespace": "global",
     "yaml_path": "rules/python-sql-injection.yaml",
@@ -204,12 +337,19 @@ func writeFeedbackTestResult(t *testing.T) (string, string) {
 		Engine:        EngineInfo{Name: "opengrep", Version: "1.23.0", Managed: true},
 		Scan:          ScanInfo{Targets: []string{"."}},
 		Findings: []Finding{{
-			RuleID:   "python.sql-injection",
+			RuleID:   "Users.l0ch.Library.Caches.greprules.packs.python-security.sha.contents.rules.python-sql-injection",
 			Path:     "src/app.py",
 			Start:    Location{Line: 10, Col: 2},
 			End:      Location{Line: 10, Col: 24},
 			Message:  "unsafe query",
 			Severity: "ERROR",
+		}, {
+			RuleID:   "python.lang.security.audit.subprocess-shell-true",
+			Path:     "src/default_rule.py",
+			Start:    Location{Line: 20, Col: 2},
+			End:      Location{Line: 20, Col: 24},
+			Message:  "opengrep default finding",
+			Severity: "WARNING",
 		}},
 		Warnings: []string{"OpenGrep diagnostic: type=ParseError path=src/app.py message=parse warning"},
 	}

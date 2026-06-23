@@ -56,24 +56,24 @@ type PackManifest struct {
 }
 
 type ManifestRule struct {
-	Slug             string   `json:"slug"`
-	Title            string   `json:"title"`
-	RuleID           string   `json:"rule_id"`
-	CanonicalRuleIDs []string `json:"canonical_rule_ids"`
-	OriginalRuleID   string   `json:"original_rule_id"`
-	RuleNamespace    string   `json:"rule_namespace"`
-	YAMLPath         string   `json:"yaml_path"`
-	Language         string   `json:"language"`
-	Framework        string   `json:"framework"`
-	Severity         string   `json:"severity"`
-	Confidence       string   `json:"confidence"`
-	License          string   `json:"license"`
-	CVE              []string `json:"cve"`
-	CWE              []string `json:"cwe"`
-	Tags             []string `json:"tags"`
-	SourceRepo       string   `json:"source_repo"`
-	SourceCommit     string   `json:"source_commit"`
-	Version          string   `json:"version"`
+	Slug            string   `json:"slug"`
+	Title           string   `json:"title"`
+	RuleID          string   `json:"rule_id"`
+	OpenGrepRuleIDs []string `json:"opengrep_rule_ids"`
+	OriginalRuleID  string   `json:"original_rule_id"`
+	RuleNamespace   string   `json:"rule_namespace"`
+	YAMLPath        string   `json:"yaml_path"`
+	Language        string   `json:"language"`
+	Framework       string   `json:"framework"`
+	Severity        string   `json:"severity"`
+	Confidence      string   `json:"confidence"`
+	License         string   `json:"license"`
+	CVE             []string `json:"cve"`
+	CWE             []string `json:"cwe"`
+	Tags            []string `json:"tags"`
+	SourceRepo      string   `json:"source_repo"`
+	SourceCommit    string   `json:"source_commit"`
+	Version         string   `json:"version"`
 }
 
 func NewRegistry(baseURL string) Client {

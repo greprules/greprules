@@ -22,13 +22,14 @@ import (
 const feedbackBundleSchemaVersion = "greprules.feedback.bundle.v1"
 
 type FeedbackBundle struct {
-	SchemaVersion string                             `json:"schemaVersion"`
-	GeneratedAt   string                             `json:"generatedAt"`
-	ResultHash    string                             `json:"resultHash"`
-	Scan          rules.ScanContribution             `json:"scan"`
-	Findings      []rules.ScanFindingContribution    `json:"findings"`
-	Diagnostics   []rules.ScanDiagnosticContribution `json:"diagnostics"`
-	Feedback      []PreparedFindingFeedback          `json:"feedback,omitempty"`
+	SchemaVersion   string                             `json:"schemaVersion"`
+	GeneratedAt     string                             `json:"generatedAt"`
+	ResultHash      string                             `json:"resultHash"`
+	Scan            rules.ScanContribution             `json:"scan"`
+	Findings        []rules.ScanFindingContribution    `json:"findings"`
+	Diagnostics     []rules.ScanDiagnosticContribution `json:"diagnostics"`
+	Feedback        []PreparedFindingFeedback          `json:"feedback,omitempty"`
+	OmittedFindings int                                `json:"omittedFindings,omitempty"`
 }
 
 type PreparedFindingFeedback struct {
@@ -41,9 +42,10 @@ type PreparedFindingFeedback struct {
 }
 
 type feedbackPrepareSummary struct {
-	BundlePath  string `json:"bundlePath"`
-	Findings    int    `json:"findings"`
-	Diagnostics int    `json:"diagnostics"`
+	BundlePath      string `json:"bundlePath"`
+	Findings        int    `json:"findings"`
+	Diagnostics     int    `json:"diagnostics"`
+	OmittedFindings int    `json:"omittedFindings"`
 }
 
 type feedbackSubmitSummary struct {
@@ -59,6 +61,16 @@ type manifestRuleRef struct {
 	Version   string
 	Language  string
 	Framework string
+}
+
+type manifestRuleRefEntry struct {
+	Ref       manifestRuleRef
+	Ambiguous bool
+}
+
+type manifestRuleRefIndex struct {
+	Exact  map[string]manifestRuleRefEntry
+	Suffix map[string]manifestRuleRefEntry
 }
 
 func RunFeedbackCommand(ctx context.Context, args []string, version string) error {
@@ -98,9 +110,10 @@ func runFeedbackPrepare(args []string, version string) error {
 		return err
 	}
 	summary := feedbackPrepareSummary{
-		BundlePath:  outputPath,
-		Findings:    len(bundle.Findings),
-		Diagnostics: len(bundle.Diagnostics),
+		BundlePath:      outputPath,
+		Findings:        len(bundle.Findings),
+		Diagnostics:     len(bundle.Diagnostics),
+		OmittedFindings: bundle.OmittedFindings,
 	}
 	if *format == "json" {
 		return cmdutil.PrintJSON(summary)
@@ -109,7 +122,15 @@ func runFeedbackPrepare(args []string, version string) error {
 		return fmt.Errorf("unknown output format: %s", *format)
 	}
 	fmt.Printf("prepared feedback bundle: %s\n", outputPath)
-	fmt.Printf("findings=%d diagnostics=%d feedback=%d\n", len(bundle.Findings), len(bundle.Diagnostics), len(bundle.Feedback))
+	fmt.Printf("findings=%d diagnostics=%d feedback=%d omittedFindings=%d\n",
+		len(bundle.Findings),
+		len(bundle.Diagnostics),
+		len(bundle.Feedback),
+		bundle.OmittedFindings,
+	)
+	if bundle.OmittedFindings > 0 {
+		fmt.Println("Omitted findings: only greprules.io registry rule findings can receive registry feedback; OpenGrep default-rule findings are skipped.")
+	}
 	if len(bundle.Findings) > 0 {
 		fmt.Println("Uploaded after approval: rule slug, rule version, finding fingerprint, hashed paths/messages, verdicts, and diagnostic hashes.")
 		fmt.Println("Not uploaded: source code, raw file paths, private repository URLs, or code snippets.")
@@ -136,6 +157,9 @@ func runFeedbackSubmit(ctx context.Context, args []string) error {
 	}
 	if bundle.SchemaVersion != feedbackBundleSchemaVersion {
 		return fmt.Errorf("unsupported feedback bundle schema: %s", bundle.SchemaVersion)
+	}
+	if err := validateFeedbackReferences(bundle); err != nil {
+		return err
 	}
 	registry := auth.ResolveRegistry(*registryFlag)
 	authToken, err := auth.RequiredToken(registry)
@@ -237,10 +261,12 @@ func BuildFeedbackBundle(resultPath string, version string) (FeedbackBundle, err
 		return FeedbackBundle{}, err
 	}
 	findings := make([]rules.ScanFindingContribution, 0, len(result.Findings))
+	omittedFindings := 0
 	for _, finding := range result.Findings {
-		ref := ruleRefs[finding.RuleID]
+		ref := lookupManifestRuleRef(ruleRefs, finding.RuleID)
 		if ref.Slug == "" {
-			ref = manifestRuleRef{Slug: safeRuleSlug(finding.RuleID), RuleID: finding.RuleID, Version: "unknown"}
+			omittedFindings++
+			continue
 		}
 		findings = append(findings, rules.ScanFindingContribution{
 			RuleSlug:           ref.Slug,
@@ -282,14 +308,87 @@ func BuildFeedbackBundle(resultPath string, version string) (FeedbackBundle, err
 			RulePackSlugs:    packIDs(lock),
 			PrivacyMode:      "hashes_only",
 		},
-		Findings:    findings,
-		Diagnostics: diagnostics,
-		Feedback:    []PreparedFindingFeedback{},
+		Findings:        findings,
+		Diagnostics:     diagnostics,
+		Feedback:        []PreparedFindingFeedback{},
+		OmittedFindings: omittedFindings,
 	}, nil
 }
 
-func loadManifestRuleRefs(root string, lock config.Lock) (map[string]manifestRuleRef, error) {
-	refs := map[string]manifestRuleRef{}
+func validateFeedbackReferences(bundle FeedbackBundle) error {
+	eligible := map[string]rules.ScanFindingContribution{}
+	for _, finding := range bundle.Findings {
+		eligible[findingKey(finding.RuleSlug, finding.RuleVersion, finding.FindingFingerprint)] = finding
+	}
+	for _, feedback := range bundle.Feedback {
+		key := findingKey(feedback.RuleSlug, feedback.RuleVersion, feedback.FindingFingerprint)
+		finding, ok := eligible[key]
+		if !ok {
+			return fmt.Errorf(
+				"feedback references a finding that is not eligible for greprules registry feedback: rule_slug=%s finding_fingerprint=%s; only findings from greprules.io registry packs can be submitted",
+				feedback.RuleSlug,
+				feedback.FindingFingerprint,
+			)
+		}
+		if strings.TrimSpace(finding.RuleVersion) == "" || strings.EqualFold(strings.TrimSpace(finding.RuleVersion), "unknown") {
+			return fmt.Errorf(
+				"feedback references a finding without a registry rule version: rule_slug=%s finding_fingerprint=%s; regenerate the feedback bundle so OpenGrep default-rule findings are omitted",
+				feedback.RuleSlug,
+				feedback.FindingFingerprint,
+			)
+		}
+	}
+	return nil
+}
+
+func lookupManifestRuleRef(ruleRefs manifestRuleRefIndex, opengrepRuleID string) manifestRuleRef {
+	opengrepRuleID = strings.TrimSpace(opengrepRuleID)
+	if entry, ok := ruleRefs.Exact[opengrepRuleID]; ok {
+		if entry.Ambiguous {
+			return manifestRuleRef{}
+		}
+		return entry.Ref
+	}
+	bestKey := ""
+	var bestRef manifestRuleRef
+	for key, entry := range ruleRefs.Suffix {
+		if entry.Ambiguous || entry.Ref.Slug == "" || !manifestRuleKeyMatches(opengrepRuleID, key) {
+			continue
+		}
+		if len(key) > len(bestKey) || (len(key) == len(bestKey) && key < bestKey) {
+			bestKey = key
+			bestRef = entry.Ref
+		}
+	}
+	return bestRef
+}
+
+func manifestRuleKeyMatches(opengrepRuleID string, manifestKey string) bool {
+	opengrepRuleID = strings.TrimSpace(opengrepRuleID)
+	manifestKey = strings.TrimSpace(manifestKey)
+	if opengrepRuleID == "" || manifestKey == "" {
+		return false
+	}
+	if opengrepRuleID == manifestKey {
+		return true
+	}
+	if !strings.HasSuffix(opengrepRuleID, manifestKey) {
+		return false
+	}
+	prefix := strings.TrimSuffix(opengrepRuleID, manifestKey)
+	if prefix == "" {
+		return true
+	}
+	switch prefix[len(prefix)-1] {
+	case '.', '/', '\\':
+		return true
+	default:
+		return false
+	}
+}
+
+func loadManifestRuleRefs(root string, lock config.Lock) (manifestRuleRefIndex, error) {
+	refs := newManifestRuleRefIndex()
 	for _, pack := range lock.Packs {
 		manifestPath := pack.ManifestPath
 		if !filepath.IsAbs(manifestPath) {
@@ -297,11 +396,11 @@ func loadManifestRuleRefs(root string, lock config.Lock) (map[string]manifestRul
 		}
 		data, err := os.ReadFile(manifestPath)
 		if err != nil {
-			return nil, err
+			return manifestRuleRefIndex{}, err
 		}
 		var manifest rules.PackManifest
 		if err := json.Unmarshal(data, &manifest); err != nil {
-			return nil, err
+			return manifestRuleRefIndex{}, err
 		}
 		for _, rule := range manifest.Rules {
 			version := fallbackString(rule.Version, manifest.BuildID)
@@ -312,19 +411,51 @@ func loadManifestRuleRefs(root string, lock config.Lock) (map[string]manifestRul
 				Language:  rule.Language,
 				Framework: rule.Framework,
 			}
-			for _, key := range manifestRuleKeys(rule) {
-				if key != "" {
-					refs[key] = ref
-				}
+			for _, key := range manifestRuleLookupKeys(rule) {
+				addManifestRuleRefKey(refs.Exact, key, ref)
+				addManifestRuleRefKey(refs.Suffix, key, ref)
 			}
 		}
 	}
 	return refs, nil
 }
 
-func manifestRuleKeys(rule rules.ManifestRule) []string {
-	keys := []string{rule.RuleID, rule.OriginalRuleID, rule.Slug}
-	keys = append(keys, rule.CanonicalRuleIDs...)
+func newManifestRuleRefIndex() manifestRuleRefIndex {
+	return manifestRuleRefIndex{
+		Exact:  map[string]manifestRuleRefEntry{},
+		Suffix: map[string]manifestRuleRefEntry{},
+	}
+}
+
+func addManifestRuleRefKey(entries map[string]manifestRuleRefEntry, key string, ref manifestRuleRef) {
+	key = strings.TrimSpace(key)
+	if key == "" || ref.Slug == "" {
+		return
+	}
+	existing, ok := entries[key]
+	if !ok {
+		entries[key] = manifestRuleRefEntry{Ref: ref}
+		return
+	}
+	if sameManifestRuleRef(existing.Ref, ref) {
+		return
+	}
+	entries[key] = manifestRuleRefEntry{Ambiguous: true}
+}
+
+func sameManifestRuleRef(a manifestRuleRef, b manifestRuleRef) bool {
+	return a.Slug == b.Slug &&
+		a.RuleID == b.RuleID &&
+		a.Version == b.Version &&
+		a.Language == b.Language &&
+		a.Framework == b.Framework
+}
+
+func manifestRuleLookupKeys(rule rules.ManifestRule) []string {
+	keys := append([]string{}, rule.OpenGrepRuleIDs...)
+	if rule.Slug != "" {
+		keys = append(keys, rule.Slug)
+	}
 	return keys
 }
 
@@ -459,22 +590,4 @@ func normalizeFeedbackSeverity(value string) string {
 	default:
 		return ""
 	}
-}
-
-func safeRuleSlug(value string) string {
-	slug := strings.ToLower(value)
-	slug = strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			return r
-		}
-		return '-'
-	}, slug)
-	slug = strings.Trim(slug, "-")
-	for strings.Contains(slug, "--") {
-		slug = strings.ReplaceAll(slug, "--", "-")
-	}
-	if slug == "" {
-		return "unknown-rule"
-	}
-	return slug
 }
