@@ -71,9 +71,9 @@ Codex skills and hooks invoke the plugin-bundled `bin/greprules` wrapper. Codex 
 The bundled wrapper resolves the real CLI in this order:
 
 1. `GREPRULES_CLI_PATH`
-2. `greprules` on `PATH`, excluding the wrapper itself
-3. GitHub Release bootstrap into the greprules user cache
+2. GitHub Release bootstrap into the greprules user cache
+3. `greprules` on `PATH`, excluding the wrapper itself, only if managed bootstrap fails
 
-The release bootstrap downloads the configured greprules CLI into the user cache when a local binary is not available.
+The release bootstrap downloads the configured greprules CLI into the user cache so plugin behavior follows the plugin-pinned CLI version. `PATH` is a fallback, not the default runtime.
 
 Plugin agent scans write results under `.greprules/plugin-data/codex/sessions/<session-id>/runs/<run-id>/agent-result.json`. Each scan run gets its own directory, so full, target, working-tree, and edited-file scans do not overwrite each other. Read the `Full result:` path printed by the scan summary. `$greprules-scan-working-tree` is the git-based changed-file scan path.

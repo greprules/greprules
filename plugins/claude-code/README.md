@@ -2,7 +2,7 @@
 
 This plugin teaches Claude Code how to use the local `greprules` CLI without embedding project configuration in prompts.
 
-The plugin provides a `bin/greprules` wrapper, not the native Go binary itself. Claude Code skills and hooks invoke that wrapper directly, so `greprules` does not need to be installed on the user's shell `PATH`. The wrapper resolves the real CLI from `GREPRULES_CLI_PATH`, system `PATH` excluding itself, or a managed GitHub Release download cached under the OS user cache directory at `greprules/plugins/claude-code/greprules/<version>/`.
+The plugin provides a `bin/greprules` wrapper, not the native Go binary itself. Claude Code skills and hooks invoke that wrapper directly, so `greprules` does not need to be installed on the user's shell `PATH`. The wrapper resolves the real CLI from `GREPRULES_CLI_PATH`, then the plugin-pinned managed GitHub Release cached under the OS user cache directory at `greprules/plugins/claude-code/greprules/<version>/`, and uses system `PATH` only as a fallback if managed bootstrap fails.
 
 The plugin does not use install-time plugin configuration. greprules always uses its managed OpenGrep runtime, shared by standalone CLI and plugin scans.
 

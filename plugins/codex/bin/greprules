@@ -10,21 +10,6 @@ if [[ -n "${GREPRULES_CLI_PATH:-}" && -f "${GREPRULES_CLI_PATH}" && -x "${GREPRU
   exec "${GREPRULES_CLI_PATH}" "$@"
 fi
 
-SELF_REAL="$(cd "$SELF_DIR" && pwd -P)/$(basename "$SELF_PATH")"
-IFS=':' read -r -a PATH_DIRS <<< "${PATH:-}"
-for DIR in "${PATH_DIRS[@]}"; do
-  [[ -z "$DIR" ]] && continue
-  DIR_REAL="$(cd "$DIR" 2>/dev/null && pwd -P || true)"
-  [[ -z "$DIR_REAL" ]] && continue
-  [[ "$DIR_REAL" == "$SELF_DIR" ]] && continue
-  CANDIDATE="$DIR/greprules"
-  if [[ -f "$CANDIDATE" && -x "$CANDIDATE" ]]; then
-    CANDIDATE_REAL="$(cd "$(dirname "$CANDIDATE")" && pwd -P)/$(basename "$CANDIDATE")"
-    [[ "$CANDIDATE_REAL" == "$SELF_REAL" ]] && continue
-    exec "$CANDIDATE" "$@"
-  fi
-done
-
 platform_os() {
   case "$(uname -s)" in
     Darwin) printf 'darwin' ;;
@@ -137,6 +122,25 @@ plugin_cache_dir() {
   esac
 }
 
+find_path_binary() {
+  local self_real dir dir_real candidate candidate_real
+  self_real="$(cd "$SELF_DIR" && pwd -P)/$(basename "$SELF_PATH")"
+  IFS=':' read -r -a PATH_DIRS <<< "${PATH:-}"
+  for dir in "${PATH_DIRS[@]}"; do
+    [[ -z "$dir" ]] && continue
+    dir_real="$(cd "$dir" 2>/dev/null && pwd -P || true)"
+    [[ -z "$dir_real" ]] && continue
+    [[ "$dir_real" == "$SELF_DIR" ]] && continue
+    candidate="$dir/greprules"
+    if [[ -f "$candidate" && -x "$candidate" ]]; then
+      candidate_real="$(cd "$(dirname "$candidate")" && pwd -P)/$(basename "$candidate")"
+      [[ "$candidate_real" == "$self_real" ]] && continue
+      exec "$candidate" "$@"
+    fi
+  done
+  return 1
+}
+
 bootstrap_managed_binary() {
   local cache_dir os arch ext archive asset_url checksum_url version_dir tmp_dir archive_path checksums_path expected actual
   cache_dir="$(plugin_cache_dir)" || return 1
@@ -223,13 +227,17 @@ if bootstrap_managed_binary "$@"; then
   exit 0
 fi
 
+if find_path_binary "$@"; then
+  exit 0
+fi
+
 cat >&2 <<EOF
 greprules CLI not found and managed bootstrap failed.
 
 Install or build greprules, then either:
-  - put it on PATH, or
-  - set GREPRULES_CLI_PATH=/absolute/path/to/greprules, or
   - allow the plugin to download ${GREPRULES_REPO} ${GREPRULES_VERSION}, or
+  - set GREPRULES_CLI_PATH=/absolute/path/to/greprules, or
+  - put greprules on PATH as a fallback, or
   - set GREPRULES_PLUGIN_CACHE_DIR to a writable cache directory.
 EOF
 exit 127

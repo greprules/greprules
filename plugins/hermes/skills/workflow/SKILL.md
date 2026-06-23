@@ -4,7 +4,7 @@ description: Use greprules from Hermes slash commands and edited-file hooks
 
 Use this skill when the user wants Hermes to run greprules scans or understand greprules plugin behavior.
 
-Hermes slash commands and hooks resolve the greprules command through the plugin adapter. They use `GREPRULES_CLI_PATH` only as an explicit local override, otherwise the plugin-bundled `bin/greprules` wrapper, and only then `greprules` on shell `PATH` as a fallback. Do not treat a missing `command -v greprules` result as a Hermes plugin setup failure.
+Hermes slash commands and hooks resolve the greprules command through the plugin adapter. They use `GREPRULES_CLI_PATH` only as an explicit local override, otherwise the plugin-bundled `bin/greprules` wrapper and its plugin-pinned managed CLI. `greprules` on shell `PATH` is only a fallback when managed bootstrap fails. Do not treat a missing `command -v greprules` result as a Hermes plugin setup failure.
 
 Available slash commands:
 

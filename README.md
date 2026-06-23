@@ -246,8 +246,8 @@ The wrapper resolves the real CLI in this order:
 
 ```text
 GREPRULES_CLI_PATH
-system PATH, excluding the plugin wrapper itself
 GitHub Release bootstrap into <user-cache-dir>/greprules/plugins/<provider>/greprules/<version>/greprules
+system PATH, excluding the plugin wrapper itself, only if managed bootstrap fails
 ```
 
 For plugin-specific details, see [`plugins/claude-code/README.md`](plugins/claude-code/README.md), [`plugins/codex/README.md`](plugins/codex/README.md), and [`plugins/hermes/README.md`](plugins/hermes/README.md).

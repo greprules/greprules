@@ -12,6 +12,6 @@ Workflow:
 4. If `registry.ok` and `opengrep.active.ok` are true, summarize setup readiness and stop. If `lock.exists` is false, mention only that rule packs have not been fetched yet and scan commands can select packs from target context before fetching.
 5. If OpenGrep is not ready, run `greprules setup-opengrep` to prepare the greprules managed OpenGrep runtime. greprules always uses this managed runtime and does not require `opengrep` on shell `PATH`.
 6. Run `greprules agent-status --format json` again and summarize registry, OpenGrep, and rule-pack state.
-7. If the CLI wrapper reports that the real CLI is missing, tell the user to set `GREPRULES_CLI_PATH`, install `greprules` on `PATH`, or allow the bundled wrapper to bootstrap the release binary under the greprules user cache. `GREPRULES_PLUGIN_CACHE_DIR` can override that cache only for debugging.
+7. If the CLI wrapper reports that the real CLI is missing, tell the user to allow the bundled wrapper to bootstrap the release binary under the greprules user cache, set `GREPRULES_CLI_PATH`, or install `greprules` on `PATH` as a fallback. `GREPRULES_PLUGIN_CACHE_DIR` can override that cache only for debugging.
 
 Do not run `greprules fetch` or `greprules scan` from this skill unless the user explicitly asks for that follow-up.

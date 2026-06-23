@@ -1,7 +1,7 @@
 {
   "name": "greprules",
   "description": "Use greprules to fetch greprules.io rule packs, run OpenGrep scans, and read agent-friendly results.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "author": {
     "name": "greprules"
   },

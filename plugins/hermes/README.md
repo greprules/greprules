@@ -20,9 +20,10 @@ The Hermes adapter resolves the command in this order:
 
 1. `GREPRULES_CLI_PATH` as an explicit local override
 2. bundled `bin/greprules` wrapper
-3. `greprules` on `PATH` only as a fallback
+3. plugin-pinned managed GitHub Release from the greprules user cache
+4. `greprules` on `PATH` only if managed bootstrap fails
 
-The bundled wrapper can download the configured greprules release into a user cache when a local binary is not available.
+The bundled wrapper downloads the configured greprules release into a user cache so plugin behavior follows the plugin-pinned CLI version. `PATH` is a fallback, not the default runtime.
 
 ## Slash Commands
 
