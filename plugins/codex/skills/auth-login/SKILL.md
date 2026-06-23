@@ -1,6 +1,6 @@
 ---
 name: greprules-auth-login
-description: Sign in to greprules.io from Codex chat so community feedback and rule proposals can submit with a stored CLI token.
+description: Sign in to greprules.io from chat.
 ---
 
 # greprules Auth Login
@@ -30,4 +30,4 @@ Rules:
 - Do not ask the user to paste tokens, API keys, cookies, or browser session data into chat.
 - Do not print or inspect the stored token file.
 - If approval expires, rerun the login command and show only the newest URL/code.
-- Community uploads still require a separate explicit approval turn in `$greprules-submit-feedback` or `$greprules-propose-rule`.
+- Community uploads still require a separate explicit approval turn in the greprules scan/review conversation. Login alone never approves a feedback or rule proposal submission.

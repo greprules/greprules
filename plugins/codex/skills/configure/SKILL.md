@@ -1,9 +1,9 @@
 ---
 name: greprules-configure
-description: Inspect and configure greprules registry, managed OpenGrep readiness, and Codex hook behavior.
+description: Check readiness, prepare OpenGrep, or change settings.
 ---
 
-Configure or inspect greprules for Codex, including registry, managed OpenGrep readiness, and hook settings.
+Use this skill when the user has just installed greprules, asks Codex to set up or configure greprules, asks for current greprules status, or wants to change registry, default-rule, managed OpenGrep, or Codex hook settings.
 
 Core rules:
 
@@ -13,8 +13,9 @@ Core rules:
 - Codex settings path: `${CODEX_HOME:-$HOME/.codex}/plugins/greprules/settings.json`.
 - greprules always uses its managed OpenGrep runtime. Do not configure `opengrep.mode` or `opengrep.path`.
 - OpenGrep default rules and Stop hook scans are opt-in only.
-- Treat a missing lockfile as rule-pack fetch state, not OpenGrep setup failure.
+- Treat a missing lockfile as rule-pack fetch state, not OpenGrep readiness failure.
 - Treat a missing Codex settings file as normal default-state, not a warning or setup problem.
+- First-run readiness is handled here. There is no separate public setup skill.
 
 Settings JSON:
 

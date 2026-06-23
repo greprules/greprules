@@ -16,25 +16,19 @@ It uses structured CLI outputs:
 
 Skills:
 
-- `/greprules:setup`: set up greprules after installing the plugin
-- `/greprules:configure`: inspect status and configure registry, default rules, or Claude Code hook settings
-- `/greprules:scan-edited`: select rule packs from edited-file context, fetch them if needed, scan files Claude Code edited in this session, and summarize findings
-- `/greprules:scan-working-tree`: select rule packs from git changed-file context, fetch them if needed, scan git working tree, staged, and untracked files, and summarize findings
-- `/greprules:scan-target <path>`: select rule packs from explicit target context, fetch them if needed, scan files or directories, and summarize findings
-- `/greprules:scan-full`: select rule packs from repository context, fetch them if needed, scan the full repository, and summarize findings
+- `/greprules:configure`: inspect first-run readiness, prepare managed OpenGrep if needed, and configure registry, default rules, or Claude Code hook settings
+- `/greprules:scan`: select rule packs from the requested scope, fetch them if needed, scan edited files, git changes, explicit paths, or the full repository, summarize findings, and optionally prepare community feedback after explicit user approval
 - `/greprules:auth-login`: sign the local greprules CLI in to greprules.io from the Claude Code conversation by showing the browser approval URL/code and waiting for approval
-- `/greprules:submit-feedback`: review a previous `agent-result.json`, prepare a redacted feedback bundle, preview uploaded and excluded fields, and submit contextual feedback only after explicit user approval
-- `/greprules:propose-rule`: prepare an agent-generated rule proposal bundle with provenance and public tests, preview uploaded and excluded fields, and submit only after explicit user approval
 
 Automatic hooks:
 
-- `SessionStart` reports registry or OpenGrep setup gaps. It does not install OpenGrep or scan. Missing rule packs are not reported as setup gaps because scan commands can fetch them automatically.
+- `SessionStart` reports registry or OpenGrep readiness gaps. It does not install OpenGrep or scan. Missing rule packs are not reported as readiness gaps because scan commands can fetch them automatically.
 - `PostToolUse` runs after Claude Code edits files with `Edit`, `MultiEdit`, `Write`, or `NotebookEdit`, captures edited file paths from the hook input, filters them to code and security-relevant config candidates, and marks the current Claude session dirty. It does not scan.
 - `Stop` attempts target-aware rule-pack selection for files Claude actually edited when Claude Code greprules `autoScan=true`, fetches selected packs if needed, verifies OpenGrep readiness, runs one targeted scan, and blocks the stop once with a compact verification prompt. If deterministic pack selection is insufficient, it blocks with instructions for Claude to inspect available packs and choose explicit slugs. A successful scan clears dirty state for that Claude session; readiness failures, pack-selection gaps, and too-many-target skips keep the dirty state for a later scan. It works in non-git directories.
-- Hook entries execute `scripts/greprules-hook.py`. The script handles Claude hook JSON, owns session-local edited-file state, and passes absolute explicit target lists to the provider-neutral `greprules agent-scan scan` primitive. Edited-file scans do not use git changed-file tracking; `/greprules:scan-working-tree` is the git-based scan path.
+- Hook entries execute `scripts/greprules-hook.py`. The script handles Claude hook JSON, owns session-local edited-file state, and passes absolute explicit target lists to the provider-neutral `greprules agent-scan scan` primitive. Edited-file scans do not use git changed-file tracking; `/greprules:scan` can choose the git changed-file scan path when the user asks for working-tree or diff scope.
 - Automatic Stop hook scans are disabled by default. Use `/greprules:configure` to update Claude Code greprules settings under `~/.claude/plugins/greprules/settings.json`.
-- Edited-file tracking stays enabled so `/greprules:scan-edited` can still be run manually; a successful manual edited-file scan clears the tracked state.
+- Edited-file tracking stays enabled so `/greprules:scan` can still run a manual edited-file scan; a successful manual edited-file scan clears the tracked state.
 - Hook state is written under the project `.greprules/plugin-data/claude-code/sessions/<session-id>/` directory by default. Override the provider state root with `GREPRULES_PLUGIN_STATE_DIR` only when needed.
 - User config and caches are intentionally not removed by Claude Code plugin uninstall. Use `greprules cleanup --config --plugin-cache --dry-run` to inspect cleanup targets.
 
-Community feedback and rule proposal submission require browser-approved greprules.io CLI login. If login is missing, Claude Code should use `/greprules:auth-login` from chat instead of sending the user to a separate terminal command. Contributions are never triggered automatically by hooks.
+Community contribution is conversation-driven instead of exposed as separate slash commands. After `/greprules:scan` reviews findings, Claude Code can offer to submit contextual true-positive, false-positive, warning, or diagnostic feedback. If Claude Code independently identifies a vulnerability that should become a reusable rule, the user can ask for a greprules.io rule proposal in normal chat. In both cases Claude Code prepares a redacted bundle, previews uploaded and excluded fields, runs `/greprules:auth-login` if needed, and submits only after the user approves the exact scope in conversation. Contributions are never triggered automatically by hooks.

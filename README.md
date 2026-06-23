@@ -7,7 +7,7 @@
 
 Agent plugin and CLI for fetching SAST rule packs from greprules.io and scanning local code changes with OpenGrep.
 
-greprules is designed for local coding agents first. The Claude Code, Codex, and Hermes plugins give agents commands or skills for first-run setup, configuring OpenGrep, selecting rule packs from code context, fetching those packs, and scanning local code changes. The Go CLI is the deterministic local runtime behind those commands.
+greprules is designed for local coding agents first. The Claude Code, Codex, and Hermes plugins give agents commands or skills for checking readiness, configuring OpenGrep behavior, selecting rule packs from code context, fetching those packs, and scanning local code changes. The Go CLI is the deterministic local runtime behind those commands.
 
 greprules is maintained in the greprules GitHub organization with support from Provally. Provally operates the hosted greprules.io registry and API used by the default configuration. Normal scans fetch rule packs from greprules.io, run OpenGrep locally, and keep standalone project locks in user state. Agent plugin scans may also write provider-specific results under local `.greprules/` paths.
 
@@ -28,9 +28,8 @@ curl -fsSL https://greprules.io/install.sh | sh
 ```
 
 ```text
-/greprules:setup
 /greprules:configure
-/greprules:scan-edited
+/greprules:scan
 ```
 
 ### Codex
@@ -47,9 +46,8 @@ Codex CLI TUI:
 ```
 
 ```text
-$greprules-setup
 $greprules-configure
-$greprules-scan-edited
+$greprules-scan
 ```
 
 ### Hermes
@@ -59,12 +57,11 @@ hermes plugins install greprules/greprules --enable
 ```
 
 ```text
-/greprules setup
 /greprules configure
-/greprules scan-edited
+/greprules scan
 ```
 
-Run `setup` once after installing the plugin. Use `configure` later to inspect status or change settings.
+Run `configure` after installing the plugin to inspect readiness, prepare the managed OpenGrep runtime if needed, or change settings.
 
 ## What It Does
 
@@ -86,7 +83,7 @@ Run `setup` once after installing the plugin. Use `configure` later to inspect s
 
 OpenGrep does the actual scanning. greprules always uses its managed OpenGrep runtime so standalone CLI scans and agent plugin scans run against the same predictable engine. The managed binary is stored in greprules' user cache and is not exposed as a shell `opengrep` command.
 
-For standalone CLI usage, the installer prepares the managed runtime, and `greprules scan` can also install it automatically if it is missing. Agent plugin setup uses the same managed runtime cache.
+For standalone CLI usage, the installer prepares the managed runtime, and `greprules scan` can also install it automatically if it is missing. Agent plugin readiness flows use the same managed runtime cache.
 
 By default, greprules scans fetched greprules.io packs only. To also include OpenGrep's default auto-selected rules:
 
@@ -240,7 +237,7 @@ GREPRULES_REGISTRY=http://127.0.0.1:8790 greprules agent-status --format json
 
 ## Plugin Runtime
 
-Agent plugins ship a `bin/greprules` wrapper, not the native Go binary itself. Skills and hooks should invoke that bundled wrapper directly; `greprules` being absent from the user's shell `PATH` is not a plugin setup failure.
+Agent plugins ship a `bin/greprules` wrapper, not the native Go binary itself. Skills and hooks should invoke that bundled wrapper directly; `greprules` being absent from the user's shell `PATH` is not a plugin readiness failure.
 
 The wrapper resolves the real CLI in this order:
 

@@ -650,7 +650,7 @@ def too_many_targets_message(count: int, limit: int, automatic: bool) -> str:
     prefix = "automatic " if automatic else ""
     return (
         f"greprules {prefix}edited-file scan skipped because {count} edited files exceed the automatic limit ({limit}). "
-        "Run the $greprules-scan-edited or $greprules-scan-working-tree skill when ready."
+        "Run $greprules-scan when ready."
     )
 
 
@@ -766,15 +766,15 @@ def scan_edited(root: Path, payload: Dict[str, Any]) -> int:
     if session_dir is None:
         sessions = dirty_session_dirs(root)
         if len(sessions) == 0:
-            print("no Codex-edited files are tracked; edit files or run $greprules-scan-working-tree")
+            print("no Codex-edited files are tracked; edit files or run $greprules-scan for git changes or explicit targets")
             return 0
         if len(sessions) > 1:
-            print("multiple Codex sessions have dirty files; start a session-scoped scan or run $greprules-scan-target for explicit files")
+            print("multiple Codex sessions have dirty files; start a session-scoped scan or run $greprules-scan for explicit files")
             return 0
         session_dir = sessions[0]
     outcome = scan_session(root, session_dir, payload, automatic=False)
     if isinstance(outcome, dict) and outcome.get("status") == "skipped" and not string_from_any(outcome.get("message")):
-        print("no Codex-edited files are tracked; edit files or run $greprules-scan-working-tree")
+        print("no Codex-edited files are tracked; edit files or run $greprules-scan for git changes or explicit targets")
         return 0
     handle_scan_outcome(root, outcome, payload, automatic=False)
     return 0
@@ -849,11 +849,11 @@ def readiness_context(root: Path) -> int:
 
     setup_guidance = ""
     if not active_ok:
-        setup_guidance = " Run the $greprules-setup skill to prepare the managed OpenGrep runtime."
+        setup_guidance = " Run the $greprules-configure skill to prepare the managed OpenGrep runtime."
 
     recommended_commands = report.get("recommendedCommands")
     recommended = ", ".join(str(item) for item in recommended_commands) if isinstance(recommended_commands, list) and recommended_commands else "$greprules-configure"
-    recommended = recommended.replace("greprules setup-opengrep", "$greprules-setup").replace("greprules agent-status --format json", "$greprules-configure")
+    recommended = recommended.replace("greprules setup-opengrep", "$greprules-configure").replace("greprules agent-status --format json", "$greprules-configure")
 
     rule_pack_guidance = ""
     if not lock_exists:

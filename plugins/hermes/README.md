@@ -28,7 +28,6 @@ The bundled wrapper downloads the configured greprules release into a user cache
 ## Slash Commands
 
 ```text
-/greprules setup
 /greprules configure registry https://api.greprules.io
 /greprules configure
 /greprules configure managed
@@ -38,29 +37,20 @@ The bundled wrapper downloads the configured greprules release into a user cache
 /greprules configure auto-scan-min-interval 45
 /greprules configure auto-scan-max-changed-files 100
 /greprules fetch python-security
-/greprules scan-edited
-/greprules scan-working-tree
-/greprules scan-target src/auth
-/greprules scan-full
+/greprules scan
+/greprules scan changed
+/greprules scan src/auth
+/greprules scan full
 ```
 
-Aliases:
-
-```text
-/greprules-scan-edited
-/greprules-scan-working-tree
-/greprules-scan-target src/auth
-/greprules-scan-full
-```
-
-Hermes can also contribute scan feedback and agent-generated rule proposals through the conversation workflow documented in the greprules skill. The agent prepares a redacted feedback bundle with `greprules agent-feedback prepare` or a rule proposal bundle with `greprules agent-proposal prepare`, previews uploaded and excluded fields, and runs the matching submit command only after explicit user approval. Community contribution requires browser-approved greprules.io CLI login; if login is missing, Hermes should start the chat login flow with `greprules auth login --agent` or fallback to `greprules auth login --no-browser`, show the approval URL/code, and wait for approval. Hooks never submit contributions automatically.
+Hermes can also contribute scan feedback and agent-generated rule proposals through the conversation workflow documented in the greprules skill. After `/greprules scan` reviews findings, Hermes can offer to submit contextual true-positive, false-positive, warning, or diagnostic feedback. If Hermes independently identifies a vulnerability that should become a reusable rule, the user can ask for a greprules.io rule proposal in normal chat. The agent prepares a redacted feedback bundle with `greprules agent-feedback prepare` or a rule proposal bundle with `greprules agent-proposal prepare`, previews uploaded and excluded fields, and runs the matching submit command only after explicit user approval. Community contribution requires browser-approved greprules.io CLI login; if login is missing, Hermes should start the chat login flow with `greprules auth login --agent` or fallback to `greprules auth login --no-browser`, show the approval URL/code, and wait for approval. Hooks never submit contributions automatically.
 
 ## Hooks
 
 - `post_tool_call` tracks files edited through Hermes file tools under `.greprules/plugin-data/hermes/sessions/<session-or-task-id>/`.
 - `pre_llm_call` scans tracked edited files for the current Hermes session before the next model turn when Hermes greprules `autoScan=true` and injects a compact result summary as context. The adapter passes absolute explicit targets; edited-file scans do not use git changed-file tracking. If rule-pack selection is ambiguous, it returns instructions to inspect available packs and fetch explicit slugs before rerunning the scan.
 
-Plugin agent scans write results under `.greprules/plugin-data/hermes/sessions/<session-or-task-id>/runs/<run-id>/agent-result.json`. Each scan run gets its own directory, so full, target, working-tree, and edited-file scans do not overwrite each other. Read the `Full result:` path printed by the scan summary. `/greprules scan-working-tree` is the git-based changed-file scan path.
+Plugin agent scans write results under `.greprules/plugin-data/hermes/sessions/<session-or-task-id>/runs/<run-id>/agent-result.json`. Each scan run gets its own directory, so full, target, working-tree, and edited-file scans do not overwrite each other. Read the `Full result:` path printed by the scan summary. `/greprules scan` chooses edited-file, git changed-file, explicit target, or full-repository scope from the user's request.
 
 A successful edited-file scan clears dirty state for that Hermes session; readiness failures, pack-selection gaps, and too-many-target skips keep the dirty state for a later scan.
 

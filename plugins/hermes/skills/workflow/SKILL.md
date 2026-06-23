@@ -1,29 +1,25 @@
 ---
-description: Use greprules from Hermes slash commands and edited-file hooks
+description: Configure, scan, or fetch greprules packs from Hermes chat
 ---
 
-Use this skill when the user wants Hermes to run greprules scans or understand greprules plugin behavior.
+Use this skill when the user wants Hermes to run greprules scans, review greprules results, contribute scan feedback, propose a greprules.io rule from an independently identified vulnerability, or understand greprules plugin behavior.
 
-Hermes slash commands and hooks resolve the greprules command through the plugin adapter. They use `GREPRULES_CLI_PATH` only as an explicit local override, otherwise the plugin-bundled `bin/greprules` wrapper and its plugin-pinned managed CLI. `greprules` on shell `PATH` is only a fallback when managed bootstrap fails. Do not treat a missing `command -v greprules` result as a Hermes plugin setup failure.
+Hermes slash commands and hooks resolve the greprules command through the plugin adapter. They use `GREPRULES_CLI_PATH` only as an explicit local override, otherwise the plugin-bundled `bin/greprules` wrapper and its plugin-pinned managed CLI. `greprules` on shell `PATH` is only a fallback when managed bootstrap fails. Do not treat a missing `command -v greprules` result as a Hermes plugin readiness failure.
 
 Available slash commands:
 
-1. `/greprules setup` sets up greprules after installation.
-2. `/greprules configure` checks registry access, rule-pack fetch state, OpenGrep readiness, and effective agent settings.
-3. `/greprules configure managed` prepares the greprules managed OpenGrep runtime.
-4. `/greprules configure registry <url>`, `include-default-rules true|false`, `auto-scan true|false`, `track-edited-files true|false`, `auto-scan-min-interval <seconds>`, and `auto-scan-max-changed-files <count>` configure persistent greprules behavior.
-5. `/greprules scan-edited` scans files tracked by the Hermes `post_tool_call` hook for a single dirty session.
-6. `/greprules scan-working-tree` scans git working tree, staged, and untracked files.
-7. `/greprules scan-target <path>` scans explicit files or directories.
-8. `/greprules scan-full` scans the full repository.
+1. `/greprules configure` checks first-run readiness, registry access, rule-pack fetch state, OpenGrep readiness, and effective agent settings.
+2. `/greprules configure managed` prepares the greprules managed OpenGrep runtime.
+3. `/greprules configure registry <url>`, `include-default-rules true|false`, `auto-scan true|false`, `track-edited-files true|false`, `auto-scan-min-interval <seconds>`, and `auto-scan-max-changed-files <count>` configure persistent greprules behavior.
+4. `/greprules scan` chooses edited files, git changes, explicit paths, or full repository scope from the user's request.
 
-Aliases are also available: `/greprules-scan-edited`, `/greprules-scan-working-tree`, `/greprules-scan-target <path>`, and `/greprules-scan-full`.
+Scan examples: `/greprules scan`, `/greprules scan changed`, `/greprules scan src/auth`, `/greprules scan full`.
 
-When rule-pack selection needs agent input, inspect the `selectionContext` returned by `greprules agent-scan scan`. Edited-file scans pass absolute explicit targets; git changed-file selection is reserved for `/greprules scan-working-tree`. Choose only slugs present in `selectionContext.availablePacks`, fetch them with the explicit fetch command shown in the scan message, then rerun the scan.
+When rule-pack selection needs agent input, inspect the `selectionContext` returned by `greprules agent-scan scan`. Edited-file scans pass absolute explicit targets. Choose only slugs present in `selectionContext.availablePacks`, fetch them with the explicit fetch command shown in the scan message, then rerun the scan.
 
 The `pre_llm_call` hook can inject compact edited-file scan results before the next model turn when Hermes greprules `autoScan=true`. Automatic scan context injection is disabled by default; use `/greprules configure auto-scan true` to enable it persistently while keeping manual commands available.
 
-Hermes edited-file state is stored under `.greprules/plugin-data/hermes/sessions/<session-or-task-id>/`. The adapter passes only explicit target files to the CLI. If multiple Hermes sessions have dirty files, do not merge them; use the current session flow or `/greprules scan-target <path>` for explicit files.
+Hermes edited-file state is stored under `.greprules/plugin-data/hermes/sessions/<session-or-task-id>/`. The adapter passes only explicit target files to the CLI. If multiple Hermes sessions have dirty files, do not merge them; use the current session flow or `/greprules scan <path>` for explicit files.
 
 greprules.io login:
 
@@ -42,7 +38,7 @@ Do not ask the user to paste tokens, API keys, cookies, or browser session data 
 
 Community feedback contribution:
 
-Use this flow only when the user explicitly asks Hermes to contribute greprules scan feedback, report true positives or false positives to greprules.io, or share scan warnings/diagnostics. This flow is never automatic and must not run from hooks without a user approval turn.
+After a manual scan/review, if the findings include justified true-positive, false-positive, accepted-risk, fixed, not-applicable, warning, or diagnostic signal, Hermes can offer to contribute that context to greprules.io. Use this flow when the user approves that offer or explicitly asks Hermes to contribute greprules scan feedback, report true positives or false positives to greprules.io, or share scan warnings/diagnostics. This flow is never automatic and must not run from hooks without a user approval turn.
 
 1. Read the `Full result:` path from a previous greprules scan. If no result path is clear, ask the user for the `agent-result.json` path.
 2. Review findings, warnings, and errors locally. Classify only findings you can justify as `true_positive`, `false_positive`, `accepted_risk`, `not_applicable`, or `fixed`.

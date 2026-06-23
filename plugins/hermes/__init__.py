@@ -506,7 +506,7 @@ def _recommended(report: Dict[str, Any]) -> str:
             if text.startswith("greprules agent-status"):
                 text = "/greprules configure"
             elif text.startswith("greprules setup-opengrep"):
-                text = "/greprules setup"
+                text = "/greprules configure managed"
             if text not in visible:
                 visible.append(text)
         return ", ".join(visible)
@@ -517,7 +517,7 @@ def _too_many_targets_message(count: int, limit: int, auto: bool) -> str:
     prefix = "automatic " if auto else ""
     return (
         f"greprules {prefix}edited-file scan skipped because {count} edited files exceed the automatic limit ({limit}). "
-        "Run /greprules scan-edited or /greprules scan-working-tree when ready."
+        "Run /greprules scan when ready."
     )
 
 
@@ -608,7 +608,7 @@ def _scan_edited(root: Path) -> Optional[str]:
     if len(sessions) == 0:
         return None
     if len(sessions) > 1:
-        return "multiple Hermes sessions have dirty files; start a session-scoped scan or run /greprules scan-target for explicit files"
+        return "multiple Hermes sessions have dirty files; start a session-scoped scan or run /greprules scan <path> for explicit files"
     return _scan_dirty(root, sessions[0].name, auto=False)
 
 
@@ -659,29 +659,6 @@ def _format_status(root: Path) -> str:
     if report.get("recommendedCommands"):
         lines.append("recommended: " + _recommended(report))
     return "\n".join(lines)
-
-
-def _setup(root: Path) -> str:
-    report, error = _status_json(root)
-    if report is None:
-        return "greprules setup could not inspect current state: " + error
-    active = ((report.get("opengrep") or {}).get("active") or {})
-    registry = report.get("registry") or {}
-    active_ok = bool(active.get("ok"))
-    if bool(registry.get("ok")) and active_ok:
-        return "greprules setup complete.\n" + _format_status(root)
-    if active_ok:
-        return "greprules setup checked runtime.\n" + _format_status(root)
-    outputs: List[str] = []
-    for command in (["setup-opengrep", "--root", str(root)],):
-        code, out, err = _run(command, root, timeout=600)
-        if code != 0:
-            return "greprules setup failed: " + (err or out or "unknown setup failure").strip()
-        if out.strip():
-            outputs.append(out.strip())
-    outputs.append("greprules setup complete.")
-    outputs.append(_format_status(root))
-    return "\n".join(outputs)
 
 
 def _configure(root: Path, argv: List[str]) -> str:
@@ -748,20 +725,34 @@ def _help() -> str:
 /greprules — greprules.io rule-pack scanning for Hermes
 
 Subcommands:
-  setup                          Set up greprules after installation
-  configure [setting]            Configure registry, default rules, hooks, or managed OpenGrep readiness
+  configure [setting]            Inspect readiness, prepare managed OpenGrep, or change settings
   fetch <pack> [pack...]         Fetch explicit rule packs
-  scan-edited                    Scan files Hermes edited and tracked this session
-  scan-working-tree              Scan git working tree, staged, and untracked files
-  scan-target <path> [...]       Scan explicit files or directories
-  scan-full                      Scan the full repository
+  scan [scope|path...]           Scan edited files, git changes, explicit paths, or the full repository
 
-Aliases:
-  /greprules-scan-edited
-  /greprules-scan-working-tree
-  /greprules-scan-target <path>
-  /greprules-scan-full
+Scan examples:
+  /greprules scan                Scan edited files if tracked, otherwise git changes
+  /greprules scan changed        Scan git working tree, staged, and untracked files
+  /greprules scan src/auth       Scan explicit files or directories
+  /greprules scan full           Scan the full repository
 """
+
+
+def _scan_command(root: Path, cwd: Path, rest: List[str]) -> str:
+    if not rest:
+        return _scan_edited(root) or _scan_with_args(_git_root(cwd), ["--changed"], "working-tree")
+    if rest[0] in {"edited", "edits", "latest", "session"}:
+        return _scan_edited(root) or "no Hermes-edited files are tracked; edit files or run /greprules scan changed"
+    scope = rest[0].lower()
+    if scope in {"changed", "changes", "working-tree", "worktree", "diff", "staged", "untracked"}:
+        return _scan_with_args(_git_root(cwd), ["--changed"], "working-tree")
+    if scope in {"full", "all", "repo", "repository", "everything"}:
+        return _scan_with_args(root, [], "full-repository")
+    if scope in {"target", "path", "paths"}:
+        targets = rest[1:]
+        if not targets:
+            return "usage: /greprules scan <path> [path...]"
+        return _scan_with_args(root, targets, "target")
+    return _scan_with_args(root, rest, "target")
 
 
 def _handle_greprules(raw_args: str = "") -> str:
@@ -775,8 +766,6 @@ def _handle_greprules(raw_args: str = "") -> str:
         return _help()
     sub = argv[0]
     rest = argv[1:]
-    if sub == "setup":
-        return _setup(root)
     if sub == "configure":
         return _configure(root, rest)
     if sub == "fetch":
@@ -786,24 +775,9 @@ def _handle_greprules(raw_args: str = "") -> str:
         args.extend(rest)
         code, out, err = _run(args, root, timeout=600)
         return (out or err or "greprules fetch finished").strip() if code == 0 else "greprules fetch failed: " + (err or out).strip()
-    if sub == "scan-edited":
-        return _scan_edited(root) or "no Hermes-edited files are tracked; edit files or run /greprules scan-working-tree"
-    if sub == "scan-working-tree":
-        return _scan_with_args(_git_root(cwd), ["--changed"], "working-tree")
-    if sub == "scan-full":
-        return _scan_with_args(root, [], "full-repository")
-    if sub == "scan-target":
-        if not rest:
-            return "usage: /greprules scan-target <path> [path...]"
-        return _scan_with_args(root, rest, "target")
+    if sub == "scan":
+        return _scan_command(root, cwd, rest)
     return "unknown greprules subcommand.\n\n" + _help()
-
-
-def _alias(subcommand: str):
-    def handler(raw_args: str = "") -> str:
-        return _handle_greprules(" ".join(part for part in [subcommand, raw_args] if part.strip()))
-
-    return handler
 
 
 def _on_post_tool_call(
@@ -837,11 +811,7 @@ def _on_pre_llm_call(session_id: str = "", task_id: str = "", **kwargs: Any) -> 
 
 
 def register(ctx) -> None:
-    ctx.register_command("greprules", _handle_greprules, "Run greprules setup, configure, fetch, and scan commands", args_hint="<subcommand>")
-    ctx.register_command("greprules-scan-edited", _alias("scan-edited"), "Scan files Hermes edited in this session")
-    ctx.register_command("greprules-scan-working-tree", _alias("scan-working-tree"), "Scan git working tree, staged, and untracked files")
-    ctx.register_command("greprules-scan-target", _alias("scan-target"), "Scan explicit greprules targets", args_hint="<path>")
-    ctx.register_command("greprules-scan-full", _alias("scan-full"), "Scan the full repository with greprules")
+    ctx.register_command("greprules", _handle_greprules, "Run greprules configure, fetch, and scan commands", args_hint="<subcommand>")
     ctx.register_hook("post_tool_call", _on_post_tool_call)
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
 
