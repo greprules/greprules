@@ -9,7 +9,7 @@ This is an explicit contribution workflow, not an automatic scan workflow. Never
 Prerequisites:
 
 - A previous greprules `agent-result.json` path. Prefer the `Full result:` path printed by `/greprules:scan-edited`, `/greprules:scan-working-tree`, `/greprules:scan-target`, or `/greprules:scan-full`.
-- An authenticated greprules.io API key available as `GREPRULES_API_KEY` or provided by the user for this action.
+- Browser-approved greprules.io CLI login from `greprules auth login`.
 
 Workflow:
 
@@ -32,6 +32,6 @@ Rules:
 
 - No automatic contribution upload.
 - No raw source code, raw file paths, private repository URLs, or code snippets.
-- Missing `GREPRULES_API_KEY` means authenticated contribution is not ready; stop and explain that greprules.io community writes are login/API-key based.
+- If submit reports that greprules login is required, stop and tell the user to run `greprules auth login` so the browser can approve contribution access.
 - Treat false positives as context-specific precision feedback, not a global rule rating penalty.
 - Do not create or upload rule proposals in this skill.

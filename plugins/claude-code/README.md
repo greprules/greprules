@@ -36,4 +36,4 @@ Automatic hooks:
 - Hook state is written under the project `.greprules/plugin-data/claude-code/sessions/<session-id>/` directory by default. Override the provider state root with `GREPRULES_PLUGIN_STATE_DIR` only when needed.
 - User config and caches are intentionally not removed by Claude Code plugin uninstall. Use `greprules cleanup --config --plugin-cache --dry-run` to inspect cleanup targets.
 
-Community feedback and rule proposal submission require authenticated greprules.io access through `GREPRULES_API_KEY`. They are never triggered automatically by hooks.
+Community feedback and rule proposal submission require browser-approved greprules.io CLI login from `greprules auth login`. They are never triggered automatically by hooks.

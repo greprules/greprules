@@ -9,7 +9,7 @@ Use this skill when the user asks Codex to turn an independently identified vuln
 
 ## Requirements
 
-- An authenticated greprules.io API key available as `GREPRULES_API_KEY` or provided by the user for this action.
+- Browser-approved greprules.io CLI login from `greprules auth login`.
 - A user-approved vulnerability explanation and a proposed OpenGrep/Semgrep-compatible YAML rule.
 - At least one positive and one negative public test fixture.
 
@@ -24,7 +24,7 @@ Use this skill when the user asks Codex to turn an independently identified vuln
    - not uploaded: private repository URLs, raw local file paths, organization secrets, unrelated source code
 6. Ask for explicit natural-language approval. If the user changes scope, update the bundle and preview again.
 7. After approval, run `greprules agent-proposal submit --bundle <rule-proposal-bundle.json> --consent-session <short-session-id>`.
-8. If `GREPRULES_API_KEY` is missing, stop and explain that greprules.io rule proposals require authenticated access.
+8. If submit reports that greprules login is required, stop and tell the user to run `greprules auth login` so the browser can approve contribution access.
 
 ## Guardrails
 

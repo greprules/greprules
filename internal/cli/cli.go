@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/greprules/greprules/internal/agent"
+	"github.com/greprules/greprules/internal/auth"
 	"github.com/greprules/greprules/internal/standalone"
 )
 
@@ -23,6 +24,8 @@ func Execute(args []string, version string) int {
 		printUsage()
 	case "fetch":
 		err = standalone.RunFetch(ctx, args[1:])
+	case "auth":
+		err = auth.RunCommand(ctx, args[1:])
 	case "setup-opengrep":
 		err = standalone.RunSetupOpenGrep(ctx, args[1:])
 	case "scan":
@@ -54,6 +57,7 @@ func printUsage() {
 
 Usage:
   greprules fetch <PACK> [PACK...]
+  greprules auth login|status|logout
   greprules setup-opengrep [VERSION] [--force]
   greprules scan [PATH_OR_OPENGREP_ARGS...] [--root PATH] [--changed] [--verbose] [--no-prepare] [-- RAW_OPENGREP_ARGS...]
   greprules cleanup [--config|--cache|--opengrep|--plugin-cache|--repo|--all] [--dry-run]`)

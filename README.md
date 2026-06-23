@@ -178,8 +178,12 @@ greprules scan --json-output result.json src
 greprules scan . --no-prepare
 greprules scan . --verbose
 greprules scan src -- --some-future-opengrep-flag value
+greprules auth login
+greprules auth status
 greprules cleanup --plugin-cache --dry-run
 ```
+
+Community feedback and rule proposal submission use browser-approved greprules.io CLI login. Run `greprules auth login` once; the browser signs in to greprules.io and approves a local CLI token stored in user state.
 
 ## Advanced Agent Configuration Reference
 

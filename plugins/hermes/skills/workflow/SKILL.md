@@ -37,7 +37,7 @@ Use this flow only when the user explicitly asks Hermes to contribute greprules 
 6. Show a concise preview covering feedback verdicts, diagnostics, uploaded fields, and excluded fields. Uploaded fields are rule slug, rule version, finding fingerprint, verdict, short message, and diagnostic hashes. Excluded fields are source code, raw file paths, private repository URLs, and code snippets.
 7. Ask for explicit natural-language approval. If the user approves only a subset, update the bundle and show the revised scope.
 8. After approval, run `greprules agent-feedback submit --bundle <feedback-bundle.json> --consent-session <short-session-id>`.
-9. If `GREPRULES_API_KEY` is missing, stop and explain that greprules.io community writes are login/API-key based.
+9. If submit reports that greprules login is required, stop and tell the user to run `greprules auth login` so the browser can approve contribution access.
 
 False-positive feedback is context-specific precision feedback. Do not describe it as a global rule downvote or direct quality-score penalty.
 
@@ -52,4 +52,4 @@ Use this flow only when the user explicitly asks Hermes to turn an independently
 5. Preview uploaded fields and excluded fields for the user.
 6. Ask for explicit natural-language approval. If scope changes, update the bundle and preview again.
 7. After approval, run `greprules agent-proposal submit --bundle <rule-proposal-bundle.json> --consent-session <short-session-id>`.
-8. If `GREPRULES_API_KEY` is missing, stop and explain that greprules.io rule proposals require login/API-key based access.
+8. If submit reports that greprules login is required, stop and tell the user to run `greprules auth login` so the browser can approve contribution access.

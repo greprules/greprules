@@ -8,7 +8,7 @@ Use this skill when the user asks `/greprules:propose-rule` or asks Claude Code 
 
 ## Requirements
 
-- An authenticated greprules.io API key available as `GREPRULES_API_KEY` or provided by the user for this action.
+- Browser-approved greprules.io CLI login from `greprules auth login`.
 - A user-approved vulnerability explanation and proposed OpenGrep/Semgrep-compatible YAML rule.
 - At least one positive and one negative public test fixture.
 
@@ -28,5 +28,5 @@ Use this skill when the user asks `/greprules:propose-rule` or asks Claude Code 
 
 - Never submit proposals automatically from hooks.
 - Never submit without positive and negative public test fixtures.
-- Missing `GREPRULES_API_KEY` means authenticated contribution is not ready; stop and explain that greprules.io rule proposals require login/API-key based access.
+- If submit reports that greprules login is required, stop and tell the user to run `greprules auth login` so the browser can approve contribution access.
 - Explain that proposals enter validation and moderation before public trust, verification, or pack eligibility.

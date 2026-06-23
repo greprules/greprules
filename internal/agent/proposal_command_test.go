@@ -8,7 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/greprules/greprules/internal/auth"
 	"github.com/greprules/greprules/internal/rules"
 )
 
@@ -57,7 +59,6 @@ func TestProposalSubmitRejectsPlaceholders(t *testing.T) {
 		"submit",
 		"--bundle", bundlePath,
 		"--consent-session", "session-123456",
-		"--api-key", "test-key",
 		"--registry", "http://127.0.0.1:1",
 	}, "vtest")
 	if err == nil {
@@ -79,7 +80,7 @@ func TestProposalSubmitPostsAgentGeneratedRule(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		if r.Header.Get("authorization") != "Bearer test-key" {
+		if r.Header.Get("authorization") != "Bearer test-token" {
 			t.Fatalf("missing bearer token")
 		}
 		sawRuleUpload = true
@@ -97,12 +98,15 @@ func TestProposalSubmitPostsAgentGeneratedRule(t *testing.T) {
 		_, _ = w.Write([]byte(`{"success":true,"rule":{"slug":"agent-sql-injection","validation_status":"queued"},"version":{"version":"1.0.0","validation_status":"queued"},"validation":{"status":"queued"}}`))
 	}))
 	defer server.Close()
+	t.Setenv("GREPRULES_STATE_HOME", filepath.Join(root, "state"))
+	if err := auth.StoreToken(server.URL, "test-token", time.Now().Add(time.Hour).UTC().Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
 
 	err := RunProposalCommand(context.Background(), []string{
 		"submit",
 		"--bundle", bundlePath,
 		"--consent-session", "session-123456",
-		"--api-key", "test-key",
 		"--registry", server.URL,
 	}, "vtest")
 	if err != nil {

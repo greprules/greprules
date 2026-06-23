@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/greprules/greprules/internal/auth"
 	"github.com/greprules/greprules/internal/cmdutil"
 	"github.com/greprules/greprules/internal/config"
 	"github.com/greprules/greprules/internal/rules"
@@ -122,20 +123,12 @@ func runFeedbackSubmit(ctx context.Context, args []string) error {
 	bundlePath := fs.String("bundle", "", "feedback bundle path")
 	consentSession := fs.String("consent-session", "", "explicit user approval session id")
 	registryFlag := fs.String("registry", "", "greprules registry URL")
-	apiKeyFlag := fs.String("api-key", "", "greprules API key")
 	format := fs.String("format", "text", "output format: text or json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if strings.TrimSpace(*bundlePath) == "" || strings.TrimSpace(*consentSession) == "" {
 		return errors.New("usage: greprules agent-feedback submit --bundle <feedback-bundle.json> --consent-session <id>")
-	}
-	apiKey := strings.TrimSpace(*apiKeyFlag)
-	if apiKey == "" {
-		apiKey = strings.TrimSpace(os.Getenv("GREPRULES_API_KEY"))
-	}
-	if apiKey == "" {
-		return errors.New("GREPRULES_API_KEY or --api-key is required")
 	}
 	bundle, err := readFeedbackBundle(*bundlePath)
 	if err != nil {
@@ -144,12 +137,10 @@ func runFeedbackSubmit(ctx context.Context, args []string) error {
 	if bundle.SchemaVersion != feedbackBundleSchemaVersion {
 		return fmt.Errorf("unsupported feedback bundle schema: %s", bundle.SchemaVersion)
 	}
-	registry := strings.TrimSpace(*registryFlag)
-	if registry == "" {
-		registry = strings.TrimSpace(os.Getenv("GREPRULES_REGISTRY"))
-	}
-	if registry == "" {
-		registry = config.DefaultRegistry
+	registry := auth.ResolveRegistry(*registryFlag)
+	authToken, err := auth.RequiredToken(registry)
+	if err != nil {
+		return err
 	}
 	consent := rules.ContributionConsent{
 		Mode:            "explicit_user_approval",
@@ -159,7 +150,7 @@ func runFeedbackSubmit(ctx context.Context, args []string) error {
 		RedactionPolicy: "no_source_code",
 	}
 	client := rules.NewRegistry(registry)
-	scanResponse, err := client.CreateScan(ctx, apiKey, rules.ScanCreateRequest{
+	scanResponse, err := client.CreateScan(ctx, authToken, rules.ScanCreateRequest{
 		Consent:  consent,
 		Scan:     bundle.Scan,
 		Findings: bundle.Findings,
@@ -172,7 +163,7 @@ func runFeedbackSubmit(ctx context.Context, args []string) error {
 		findingIDs[findingKey(finding.RuleSlug, finding.RuleVersion, finding.FindingFingerprint)] = finding.ID
 	}
 	if len(bundle.Diagnostics) > 0 {
-		if _, err := client.CreateScanDiagnostics(ctx, apiKey, rules.ScanDiagnosticCreateRequest{
+		if _, err := client.CreateScanDiagnostics(ctx, authToken, rules.ScanDiagnosticCreateRequest{
 			ScanID:      scanResponse.ScanID,
 			Consent:     consent,
 			Diagnostics: bundle.Diagnostics,
@@ -186,7 +177,7 @@ func runFeedbackSubmit(ctx context.Context, args []string) error {
 		if findingID == "" {
 			return fmt.Errorf("feedback references unknown finding: %s", feedback.FindingFingerprint)
 		}
-		if _, err := client.CreateFindingFeedback(ctx, apiKey, feedback.RuleSlug, rules.FindingFeedbackCreateRequest{
+		if _, err := client.CreateFindingFeedback(ctx, authToken, feedback.RuleSlug, rules.FindingFeedbackCreateRequest{
 			FindingID:  findingID,
 			Verdict:    feedback.Verdict,
 			Message:    feedback.Message,

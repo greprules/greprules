@@ -12,7 +12,7 @@ This skill is never automatic. Do not run it from hooks, and do not submit anyth
 Prerequisites:
 
 - A previous greprules scan result path, usually the `Full result:` path printed by `$greprules-scan-edited`, `$greprules-scan-working-tree`, `$greprules-scan-target`, or `$greprules-scan-full`.
-- An authenticated greprules.io API key available as `GREPRULES_API_KEY` or provided by the user for this action.
+- Browser-approved greprules.io CLI login from `greprules auth login`.
 
 Workflow:
 
@@ -34,6 +34,6 @@ Rules:
 
 - Never submit feedback from automatic hook output without a user approval turn.
 - Never upload raw source code, raw file paths, private repository URLs, or code snippets.
-- If `GREPRULES_API_KEY` is missing, stop and tell the user that authenticated greprules.io contribution requires a login/API key.
+- If submit reports that greprules login is required, stop and tell the user to run `greprules auth login` so the browser can approve contribution access.
 - False-positive feedback means "false positive in this context", not a global rule downvote.
 - Do not create rule proposals in this skill; use `$greprules-propose-rule` for agent-generated rule proposals.

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/greprules/greprules/internal/auth"
 	"github.com/greprules/greprules/internal/cmdutil"
-	"github.com/greprules/greprules/internal/config"
 	"github.com/greprules/greprules/internal/rules"
 )
 
@@ -80,20 +80,12 @@ func runProposalSubmit(ctx context.Context, args []string) error {
 	bundlePath := fs.String("bundle", "", "rule proposal bundle path")
 	consentSession := fs.String("consent-session", "", "explicit user approval session id")
 	registryFlag := fs.String("registry", "", "greprules registry URL")
-	apiKeyFlag := fs.String("api-key", "", "greprules API key")
 	format := fs.String("format", "text", "output format: text or json")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if strings.TrimSpace(*bundlePath) == "" || strings.TrimSpace(*consentSession) == "" {
 		return errors.New("usage: greprules agent-proposal submit --bundle <rule-proposal-bundle.json> --consent-session <id>")
-	}
-	apiKey := strings.TrimSpace(*apiKeyFlag)
-	if apiKey == "" {
-		apiKey = strings.TrimSpace(os.Getenv("GREPRULES_API_KEY"))
-	}
-	if apiKey == "" {
-		return errors.New("GREPRULES_API_KEY or --api-key is required")
 	}
 	bundle, err := readRuleProposalBundle(*bundlePath)
 	if err != nil {
@@ -113,15 +105,13 @@ func runProposalSubmit(ctx context.Context, args []string) error {
 	if err := validateRuleProposalBundle(bundle); err != nil {
 		return err
 	}
-	registry := strings.TrimSpace(*registryFlag)
-	if registry == "" {
-		registry = strings.TrimSpace(os.Getenv("GREPRULES_REGISTRY"))
-	}
-	if registry == "" {
-		registry = config.DefaultRegistry
+	registry := auth.ResolveRegistry(*registryFlag)
+	authToken, err := auth.RequiredToken(registry)
+	if err != nil {
+		return err
 	}
 	client := rules.NewRegistry(registry)
-	response, err := client.CreateRule(ctx, apiKey, bundle.Proposal)
+	response, err := client.CreateRule(ctx, authToken, bundle.Proposal)
 	if err != nil {
 		return err
 	}

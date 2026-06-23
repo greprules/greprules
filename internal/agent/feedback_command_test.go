@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/greprules/greprules/internal/auth"
 	"github.com/greprules/greprules/internal/config"
 	"github.com/greprules/greprules/internal/rules"
 )
@@ -78,7 +80,7 @@ func TestFeedbackSubmitPostsScanDiagnosticsAndFindingFeedback(t *testing.T) {
 
 	var sawScan, sawDiagnostics, sawFeedback bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("authorization") != "Bearer test-key" {
+		if r.Header.Get("authorization") != "Bearer test-token" {
 			t.Fatalf("missing bearer token on %s", r.URL.Path)
 		}
 		w.Header().Set("content-type", "application/json")
@@ -125,12 +127,14 @@ func TestFeedbackSubmitPostsScanDiagnosticsAndFindingFeedback(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	if err := auth.StoreToken(server.URL, "test-token", time.Now().Add(time.Hour).UTC().Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
 
 	err = RunFeedbackCommand(context.Background(), []string{
 		"submit",
 		"--bundle", bundlePath,
 		"--consent-session", "session-123456",
-		"--api-key", "test-key",
 		"--registry", server.URL,
 	}, "vtest")
 	if err != nil {

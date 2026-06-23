@@ -108,36 +108,36 @@ type FindingFeedbackCreateResponse struct {
 	Verdict    string `json:"verdict"`
 }
 
-func (c Client) CreateScan(ctx context.Context, apiKey string, request ScanCreateRequest) (ScanCreateResponse, error) {
+func (c Client) CreateScan(ctx context.Context, authToken string, request ScanCreateRequest) (ScanCreateResponse, error) {
 	var response ScanCreateResponse
-	err := c.postJSON(ctx, "/api/scans", apiKey, request, &response)
+	err := c.postJSON(ctx, "/api/scans", authToken, request, &response)
 	return response, err
 }
 
-func (c Client) CreateScanDiagnostics(ctx context.Context, apiKey string, request ScanDiagnosticCreateRequest) (ScanDiagnosticCreateResponse, error) {
+func (c Client) CreateScanDiagnostics(ctx context.Context, authToken string, request ScanDiagnosticCreateRequest) (ScanDiagnosticCreateResponse, error) {
 	var response ScanDiagnosticCreateResponse
-	err := c.postJSON(ctx, "/api/scan-diagnostics", apiKey, request, &response)
+	err := c.postJSON(ctx, "/api/scan-diagnostics", authToken, request, &response)
 	return response, err
 }
 
-func (c Client) CreateFindingFeedback(ctx context.Context, apiKey string, ruleSlug string, request FindingFeedbackCreateRequest) (FindingFeedbackCreateResponse, error) {
+func (c Client) CreateFindingFeedback(ctx context.Context, authToken string, ruleSlug string, request FindingFeedbackCreateRequest) (FindingFeedbackCreateResponse, error) {
 	var response FindingFeedbackCreateResponse
-	err := c.postJSON(ctx, "/api/rules/"+url.PathEscape(ruleSlug)+"/findings/feedback", apiKey, request, &response)
+	err := c.postJSON(ctx, "/api/rules/"+url.PathEscape(ruleSlug)+"/findings/feedback", authToken, request, &response)
 	return response, err
 }
 
-func (c Client) postJSON(ctx context.Context, endpoint string, apiKey string, requestBody any, target any) error {
-	return c.doJSON(ctx, http.MethodPost, endpoint, apiKey, requestBody, target)
+func (c Client) postJSON(ctx context.Context, endpoint string, authToken string, requestBody any, target any) error {
+	return c.doJSON(ctx, http.MethodPost, endpoint, authToken, requestBody, target)
 }
 
-func (c Client) putJSON(ctx context.Context, endpoint string, apiKey string, requestBody any, target any) error {
-	return c.doJSON(ctx, http.MethodPut, endpoint, apiKey, requestBody, target)
+func (c Client) putJSON(ctx context.Context, endpoint string, authToken string, requestBody any, target any) error {
+	return c.doJSON(ctx, http.MethodPut, endpoint, authToken, requestBody, target)
 }
 
-func (c Client) doJSON(ctx context.Context, method string, endpoint string, apiKey string, requestBody any, target any) error {
-	apiKey = strings.TrimSpace(apiKey)
-	if apiKey == "" {
-		return fmt.Errorf("greprules API key is required")
+func (c Client) doJSON(ctx context.Context, method string, endpoint string, authToken string, requestBody any, target any) error {
+	authToken = strings.TrimSpace(authToken)
+	if authToken == "" {
+		return fmt.Errorf("greprules auth token is required")
 	}
 	body, err := json.Marshal(requestBody)
 	if err != nil {
@@ -152,7 +152,7 @@ func (c Client) doJSON(ctx context.Context, method string, endpoint string, apiK
 		return err
 	}
 	req.Header.Set("accept", "application/json")
-	req.Header.Set("authorization", "Bearer "+apiKey)
+	req.Header.Set("authorization", "Bearer "+authToken)
 	req.Header.Set("content-type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {

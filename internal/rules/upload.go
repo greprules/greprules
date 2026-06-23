@@ -66,14 +66,14 @@ type RuleUploadResponse struct {
 	} `json:"validation"`
 }
 
-func (c Client) CreateRule(ctx context.Context, apiKey string, request RuleUploadRequest) (RuleUploadResponse, error) {
+func (c Client) CreateRule(ctx context.Context, authToken string, request RuleUploadRequest) (RuleUploadResponse, error) {
 	var response RuleUploadResponse
-	err := c.postJSON(ctx, "/api/rules", apiKey, request, &response)
+	err := c.postJSON(ctx, "/api/rules", authToken, request, &response)
 	return response, err
 }
 
-func (c Client) UpdateRule(ctx context.Context, apiKey string, slug string, request RuleUploadRequest) (RuleUploadResponse, error) {
+func (c Client) UpdateRule(ctx context.Context, authToken string, slug string, request RuleUploadRequest) (RuleUploadResponse, error) {
 	var response RuleUploadResponse
-	err := c.putJSON(ctx, "/api/me/rules/"+url.PathEscape(slug), apiKey, request, &response)
+	err := c.putJSON(ctx, "/api/me/rules/"+url.PathEscape(slug), authToken, request, &response)
 	return response, err
 }
