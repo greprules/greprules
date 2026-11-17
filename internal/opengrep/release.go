@@ -63,21 +63,28 @@ func SelectBinaryAsset(release Release, goos, goarch string) (Asset, Asset, Asse
 	if err != nil {
 		return Asset{}, Asset{}, Asset{}, err
 	}
-	var binary, cert, sig Asset
-	for _, asset := range release.Assets {
-		switch asset.Name {
-		case binaryName:
-			binary = asset
-		case binaryName + ".cert":
-			cert = asset
-		case binaryName + ".sig":
-			sig = asset
+	binaryNames := []string{binaryName}
+	if goos == "linux" {
+		// OpenGrep 2 renamed its Linux binaries; retain support for older releases.
+		binaryNames = append(binaryNames, strings.Replace(binaryName, "opengrep_linux_", "opengrep_manylinux_", 1))
+	}
+	for _, binaryName := range binaryNames {
+		var binary, cert, sig Asset
+		for _, asset := range release.Assets {
+			switch asset.Name {
+			case binaryName:
+				binary = asset
+			case binaryName + ".cert":
+				cert = asset
+			case binaryName + ".sig":
+				sig = asset
+			}
+		}
+		if binary.Name != "" {
+			return binary, cert, sig, nil
 		}
 	}
-	if binary.Name == "" {
-		return Asset{}, Asset{}, Asset{}, fmt.Errorf("OpenGrep release %s has no asset for %s/%s (%s)", release.TagName, goos, goarch, binaryName)
-	}
-	return binary, cert, sig, nil
+	return Asset{}, Asset{}, Asset{}, fmt.Errorf("OpenGrep release %s has no asset for %s/%s (%s)", release.TagName, goos, goarch, strings.Join(binaryNames, ", "))
 }
 
 func assetName(goos, goarch string) (string, error) {
@@ -91,10 +98,10 @@ func assetName(goos, goarch string) (string, error) {
 		}
 	case "linux":
 		if goarch == "arm64" {
-			return "opengrep_manylinux_aarch64", nil
+			return "opengrep_linux_aarch64", nil
 		}
 		if goarch == "amd64" {
-			return "opengrep_manylinux_x86", nil
+			return "opengrep_linux_x86", nil
 		}
 	case "windows":
 		if goarch == "amd64" || goarch == "386" {
