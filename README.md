@@ -149,7 +149,7 @@ If the greprules.io shortcut is unavailable, use `https://raw.githubusercontent.
 To pin a version or install somewhere else:
 
 ```bash
-curl -fsSL https://greprules.io/install.sh | GREPRULES_VERSION=v0.5.2 sh
+curl -fsSL https://greprules.io/install.sh | GREPRULES_VERSION=v0.5.1 sh
 curl -fsSL https://greprules.io/install.sh | GREPRULES_INSTALL_DIR=/usr/local/bin sh
 ```
 
